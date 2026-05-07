@@ -1,7 +1,7 @@
 # WiringWorkbench
 
 <p align="center">
-  <img src="assets/logo.png" width="550" alt="WiringWorkbench screenshot">
+  <img src="https://github.com/DraSoGo/WiringWorkbench/blob/main/assets/logo.png?raw=true" width="550" alt="WiringWorkbench screenshot">
 </p>
 
 [![React](https://img.shields.io/badge/react-19-61DAFB.svg)](https://react.dev/)
