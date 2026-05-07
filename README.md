@@ -1,7 +1,7 @@
 # WiringWorkbench
 
 <p align="center">
-  <img src="assets/logo.png" width="350" alt="WiringWorkbench screenshot">
+  <img src="assets/logo.png" width="700" alt="WiringWorkbench screenshot">
 </p>
 
 [![React](https://img.shields.io/badge/react-19-61DAFB.svg)](https://react.dev/)
