@@ -146,7 +146,7 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
       >
         {/* wordmark */}
         <div style={{ ...mono, fontWeight: 600, fontSize: 13, color: 'var(--phosphor)', flexShrink: 0 }}>
-          EASY<span style={{ color: 'var(--amber)' }}>ARDUINO</span>
+          WIRING<span style={{ color: 'var(--amber)' }}>WORKBENCH</span>
         </div>
 
         <div style={{ flex: 1 }} />
