@@ -34,6 +34,7 @@ export interface DiagramNode {
   label: string;
   position: { x: number; y: number };
   portCount?: number;
+  portsOverride?: PortDef[];
 }
 
 export interface DiagramEdge {
@@ -74,6 +75,9 @@ interface DiagramState {
   // selection
   selectNode: (instanceId: string | null) => void;
   clearSelection: () => void;
+
+  // node port overrides
+  setNodePortsOverride: (instanceId: string, ports: PortDef[] | undefined) => void;
 
   // custom defs
   addCustomDef: (def: ComponentDef) => void;
@@ -155,6 +159,12 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   selectNode: (instanceId) => set({ selectedId: instanceId }),
 
   clearSelection: () => set({ selectedId: null }),
+
+  setNodePortsOverride: (instanceId, ports) => set((s) => ({
+    nodes: s.nodes.map((n) =>
+      n.instanceId === instanceId ? { ...n, portsOverride: ports } : n
+    ),
+  })),
 
   addCustomDef: (def) => set((s) => ({
     customDefs: [...s.customDefs, def],

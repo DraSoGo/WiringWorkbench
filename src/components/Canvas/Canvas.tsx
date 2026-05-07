@@ -20,7 +20,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useDiagramStore, type PortRole } from '../../store/diagram';
+import { useDiagramStore, type DiagramNode, type PortRole } from '../../store/diagram';
 import { BOARDS } from '../../data/boards';
 import { SENSORS } from '../../data/sensors';
 import ComponentNode, { type ComponentNodeData } from './ComponentNode';
@@ -54,17 +54,18 @@ function portAlreadyUsed(nodeId: string, portId: string, edges: Edge[]): boolean
 }
 
 function buildRfNode(
-  storeNode: { instanceId: string; defId: string; label: string; position: { x: number; y: number } },
+  storeNode: DiagramNode,
   usedPorts: Set<string>,
   extraDefs: typeof ALL_DEFS = []
 ): Node {
   const def = [...ALL_DEFS, ...extraDefs].find((d) => d.id === storeNode.defId);
   if (!def) throw new Error(`Unknown defId: ${storeNode.defId}`);
+  const effectiveDef = storeNode.portsOverride ? { ...def, ports: storeNode.portsOverride } : def;
   return {
     id: storeNode.instanceId,
     type: 'componentNode',
     position: storeNode.position,
-    data: { def, label: storeNode.label, usedPorts } satisfies ComponentNodeData,
+    data: { def: effectiveDef, label: storeNode.label, usedPorts } satisfies ComponentNodeData,
   };
 }
 
@@ -139,10 +140,25 @@ function CanvasInner() {
     const storeIds = new Set(store.nodes.map((n) => n.instanceId));
     const added = store.nodes.filter((n) => !knownIds.current.has(n.instanceId));
     const removedIds = [...knownIds.current].filter((id) => !storeIds.has(id));
-    if (added.length === 0 && removedIds.length === 0) return;
+    const addedIds = new Set(added.map((n) => n.instanceId));
+
     setRfNodes((prev) => {
+      // remove deleted nodes
       let next = prev.filter((n) => !removedIds.includes(n.id));
+      // add new nodes
       for (const n of added) next = [...next, buildRfNode(n, new Set(), store.customDefs)];
+      // patch existing nodes: label and portsOverride may have changed
+      next = next.map((rfNode) => {
+        if (addedIds.has(rfNode.id)) return rfNode;
+        const sn = store.nodes.find((n) => n.instanceId === rfNode.id);
+        if (!sn) return rfNode;
+        const baseDef = [...ALL_DEFS, ...store.customDefs].find((d) => d.id === sn.defId);
+        if (!baseDef) return rfNode;
+        const effectiveDef = sn.portsOverride ? { ...baseDef, ports: sn.portsOverride } : baseDef;
+        const cur = rfNode.data as ComponentNodeData;
+        if (cur.label === sn.label && cur.def === effectiveDef) return rfNode;
+        return { ...rfNode, data: { ...rfNode.data, def: effectiveDef, label: sn.label } };
+      });
       return next;
     });
     knownIds.current = storeIds;
