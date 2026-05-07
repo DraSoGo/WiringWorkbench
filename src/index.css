@@ -18,6 +18,27 @@
   --text-muted:    #4a6b4a;
   --red:           #ff4757;
   --blue:          #00b4d8;
+  --edge-color:    #6b7280;
+}
+
+:root.light {
+  --bg-base:       #f0f3ed;
+  --bg-surface:    #e8ebe4;
+  --bg-panel:      #dfe3da;
+  --bg-hover:      #d3d9cc;
+  --border:        #bdc6b5;
+  --border-accent: #a8b39e;
+  --phosphor:      #007a35;
+  --phosphor-dim:  #005a26;
+  --phosphor-mute: #cce8d8;
+  --amber:         #8a5500;
+  --amber-dim:     #6e4400;
+  --text-primary:  #1a2a18;
+  --text-secondary:#3a5a38;
+  --text-muted:    #7a8a76;
+  --red:           #cc2222;
+  --blue:          #0066aa;
+  --edge-color:    #8a9490;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -40,9 +61,9 @@ html, body, #root {
 .react-flow__controls-button:hover { background: var(--bg-hover) !important; }
 .react-flow__minimap { background: var(--bg-panel) !important; border: 1px solid var(--border) !important; border-radius: 0 !important; }
 /* edges */
-.react-flow__edge-path { stroke: #6b7280; stroke-width: 2; fill: none; }
+.react-flow__edge-path { stroke: var(--edge-color); stroke-width: 2; fill: none; }
 .react-flow__edge.selected .react-flow__edge-path { stroke: var(--blue); }
-.react-flow__edge:hover .react-flow__edge-path { stroke: #9ca3af; }
+.react-flow__edge:hover .react-flow__edge-path { stroke: var(--border-accent); }
 .react-flow__edge-interaction { stroke: transparent; stroke-width: 14; }
 
 /* edge labels */

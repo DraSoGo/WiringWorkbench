@@ -338,7 +338,7 @@ function CanvasInner() {
         fitView
         minZoom={0.15}
         maxZoom={2}
-        deleteKeyCode="Delete"
+        deleteKeyCode={['Delete', 'Backspace']}
         selectionKeyCode={null}
         multiSelectionKeyCode={null}
       >
@@ -346,6 +346,34 @@ function CanvasInner() {
         <Controls showInteractive={false} />
         <MiniMap nodeColor="var(--bg-surface)" maskColor="rgba(13,15,14,0.75)" style={{ border: '1px solid var(--border)' }} />
       </ReactFlow>
+
+      {/* empty state hint */}
+      {rfNodes.length === 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            zIndex: 1,
+          }}
+        >
+          <div
+            style={{
+              textAlign: 'center',
+              fontFamily: 'IBM Plex Mono, monospace',
+              color: 'var(--text-muted)',
+              userSelect: 'none',
+            }}
+          >
+            <div style={{ fontSize: 32, marginBottom: 16, opacity: 0.25, lineHeight: 1 }}>◻</div>
+            <div style={{ fontSize: 13 }}>Drag a board or sensor from the left panel</div>
+            <div style={{ fontSize: 11, marginTop: 6, opacity: 0.7 }}>to get started</div>
+          </div>
+        </div>
+      )}
 
       {/* floating edge label editor */}
       {labelEditor && (

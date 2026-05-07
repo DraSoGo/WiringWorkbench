@@ -6,19 +6,27 @@ import {
   exportJSON,
   exportShareURL,
 } from '../../lib/export';
+import { saveDiagram } from '../../lib/storage';
+
+interface Props {
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
+}
 
 const mono: React.CSSProperties = {
   fontFamily: 'IBM Plex Mono, monospace',
   letterSpacing: '0.06em',
 };
 
-function ToolBtn({
+function Btn({
   label,
+  title,
   onClick,
   disabled,
   accent,
 }: {
   label: string;
+  title?: string;
   onClick: () => void;
   disabled?: boolean;
   accent?: boolean;
@@ -27,6 +35,7 @@ function ToolBtn({
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       style={{
         ...mono,
         fontSize: 11,
@@ -39,6 +48,7 @@ function ToolBtn({
         border: accent ? '1px solid var(--phosphor-dim)' : 'none',
         padding: accent ? '3px 10px' : '0',
         cursor: disabled ? 'not-allowed' : 'pointer',
+        flexShrink: 0,
       }}
     >
       {label}
@@ -46,25 +56,23 @@ function ToolBtn({
   );
 }
 
-function Divider() {
+function Sep() {
   return (
     <span
       style={{
         width: 1,
-        height: 18,
+        height: 16,
         background: 'var(--border)',
         display: 'inline-block',
-        margin: '0 4px',
         flexShrink: 0,
       }}
     />
   );
 }
 
-export default function Toolbar() {
+export default function Toolbar({ theme, onToggleTheme }: Props) {
   const store = useDiagramStore();
   const { undo, redo, history, future } = store;
-
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -74,69 +82,109 @@ export default function Toolbar() {
     toastTimer.current = setTimeout(() => setToast(null), 2200);
   };
 
-  const state = {
+  const exportState = {
     nodes: store.nodes,
     edges: store.edges,
     customDefs: store.customDefs,
   };
 
+  const handleNew = () => {
+    if (
+      store.nodes.length === 0 ||
+      window.confirm('Clear the current diagram? This cannot be undone.')
+    ) {
+      store.loadDiagram({ nodes: [], edges: [], customDefs: [] });
+    }
+  };
+
+  const handleSave = () => {
+    saveDiagram(exportState);
+    showToast('Saved!');
+  };
+
   const handleExportJSON = () => {
-    downloadFile('diagram.json', exportJSON(state), 'application/json');
+    downloadFile('diagram.json', exportJSON(exportState), 'application/json');
   };
 
   const handleExportArduino = () => {
-    downloadFile('sketch.ino', exportArduinoStub(state), 'text/plain');
+    downloadFile('sketch.ino', exportArduinoStub(exportState), 'text/plain');
   };
 
   const handleShare = async () => {
-    const url = exportShareURL(state);
+    const url = exportShareURL(exportState);
     try {
       await navigator.clipboard.writeText(url);
       showToast('Link copied!');
     } catch {
-      // Fallback: open in new tab so user can copy manually
       window.open(url, '_blank');
-      showToast('Opened in new tab — copy URL');
+      showToast('Opened in new tab');
     }
   };
 
   return (
     <>
       <header
-        className="flex items-center border-b"
         style={{
           height: 44,
           background: 'var(--bg-surface)',
-          borderColor: 'var(--border)',
+          borderBottom: '1px solid var(--border)',
           flexShrink: 0,
-          padding: '0 16px',
-          gap: 12,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 14px',
+          gap: 10,
         }}
       >
         {/* wordmark */}
-        <div style={{ ...mono, fontWeight: 600, fontSize: 13, color: 'var(--phosphor)' }}>
+        <div style={{ ...mono, fontWeight: 600, fontSize: 13, color: 'var(--phosphor)', flexShrink: 0 }}>
           EASY<span style={{ color: 'var(--amber)' }}>ARDUINO</span>
         </div>
 
         <div style={{ flex: 1 }} />
 
-        {/* history */}
-        <ToolBtn label="UNDO" onClick={undo} disabled={!history.length} />
-        <ToolBtn label="REDO" onClick={redo} disabled={!future.length} />
+        {/* diagram ops */}
+        <Btn label="NEW" title="New diagram" onClick={handleNew} />
+        <Btn label="SAVE" title="Save to browser (Ctrl+S)" onClick={handleSave} accent />
 
-        <Divider />
+        <Sep />
+
+        {/* history */}
+        <Btn label="UNDO" title="Undo (Ctrl+Z)" onClick={undo} disabled={!history.length} />
+        <Btn label="REDO" title="Redo (Ctrl+Y)" onClick={redo} disabled={!future.length} />
+
+        <Sep />
 
         {/* export */}
-        <ToolBtn label="JSON" onClick={handleExportJSON} accent />
-        <ToolBtn label=".INO" onClick={handleExportArduino} accent />
+        <Btn label="JSON" title="Download pin map as JSON" onClick={handleExportJSON} accent />
+        <Btn label=".INO" title="Download Arduino sketch stub" onClick={handleExportArduino} accent />
 
-        <Divider />
+        <Sep />
 
-        {/* share */}
-        <ToolBtn label="SHARE" onClick={handleShare} accent />
+        <Btn label="SHARE" title="Copy shareable URL to clipboard" onClick={handleShare} accent />
+
+        <Sep />
+
+        {/* theme toggle */}
+        <button
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          style={{
+            ...mono,
+            fontSize: 14,
+            background: 'none',
+            border: 'none',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            padding: '0 2px',
+            lineHeight: 1,
+            flexShrink: 0,
+          }}
+        >
+          {theme === 'dark' ? '○' : '●'}
+        </button>
       </header>
 
-      {/* share toast */}
+      {/* toast */}
       {toast && (
         <div
           style={{

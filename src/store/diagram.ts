@@ -110,13 +110,13 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   _loadGen: 0,
 
   addNode: (node) => set((s) => ({
-    history: [...s.history, snapshot(s)],
+    history: [...s.history, snapshot(s)].slice(-50),
     future: [],
     nodes: [...s.nodes, node],
   })),
 
   removeNode: (instanceId) => set((s) => ({
-    history: [...s.history, snapshot(s)],
+    history: [...s.history, snapshot(s)].slice(-50),
     future: [],
     nodes: s.nodes.filter((n) => n.instanceId !== instanceId),
     edges: s.edges.filter(
@@ -145,14 +145,14 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
     );
     if (duplicate) return s;
     return {
-      history: [...s.history, snapshot(s)],
+      history: [...s.history, snapshot(s)].slice(-50),
       future: [],
       edges: [...s.edges, edge],
     };
   }),
 
   removeEdge: (edgeId) => set((s) => ({
-    history: [...s.history, snapshot(s)],
+    history: [...s.history, snapshot(s)].slice(-50),
     future: [],
     edges: s.edges.filter((e) => e.id !== edgeId),
   })),
