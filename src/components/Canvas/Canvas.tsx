@@ -341,7 +341,7 @@ function CanvasInner() {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      const defId = e.dataTransfer.getData('application/easyarduino-def');
+      const defId = e.dataTransfer.getData('application/wiringworkbench-def');
       if (!defId) return;
       const def = [...ALL_DEFS, ...store.customDefs].find((d) => d.id === defId);
       if (!def) return;

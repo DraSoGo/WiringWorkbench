@@ -1,7 +1,7 @@
 import type { ExportState } from './export';
 
-const DIAGRAM_KEY = 'easyarduino_diagram';
-const THEME_KEY = 'easyarduino_theme';
+const DIAGRAM_KEY = 'wiringworkbench_diagram';
+const THEME_KEY = 'wiringworkbench_theme';
 
 export function saveDiagram(state: ExportState): void {
   try {

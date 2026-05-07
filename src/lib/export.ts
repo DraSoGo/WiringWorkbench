@@ -122,7 +122,7 @@ export function exportArduinoStub(state: ExportState): string {
 
   // header comment
   lines.push('/*');
-  lines.push(' * EasyArduino — generated pin mapping');
+  lines.push(' * WiringWorkbench — generated pin mapping');
   lines.push(` * Date: ${date}`);
   if (boards.length) lines.push(` * Board(s): ${boards.map((n) => n.label).join(', ')}`);
   if (sensors.length) lines.push(` * Components: ${sensors.map((n) => n.label).join(', ')}`);

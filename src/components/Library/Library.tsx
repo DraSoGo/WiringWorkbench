@@ -76,7 +76,7 @@ function ComponentRow({
     <div
       draggable
       onDragStart={(e) => {
-        e.dataTransfer.setData('application/easyarduino-def', def.id);
+        e.dataTransfer.setData('application/wiringworkbench-def', def.id);
         e.dataTransfer.effectAllowed = 'copy';
       }}
       onMouseEnter={() => setHovered(true)}
