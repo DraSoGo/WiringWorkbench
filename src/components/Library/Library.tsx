@@ -286,7 +286,11 @@ export default function Library() {
         <ComponentModal
           initial={modal.editing}
           onSave={(def) => {
-            modal.editing ? updateCustomDef(def) : addCustomDef(def);
+            if (modal.editing) {
+              updateCustomDef(def);
+            } else {
+              addCustomDef(def);
+            }
             setModal({ open: false });
           }}
           onClose={() => setModal({ open: false })}

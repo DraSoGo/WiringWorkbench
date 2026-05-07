@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   useDiagramStore,
   type ComponentDef,
-  type DiagramEdge,
   type DiagramNode,
   type PortDef,
   type PortRole,
@@ -25,78 +24,13 @@ const ROLE_COLOR: Record<string, string> = {
   custom:  '#d4e8d0',
 };
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-function getEffectivePorts(node: DiagramNode, allDefs: ComponentDef[]): PortDef[] {
-  if (node.portsOverride) return node.portsOverride;
-  return allDefs.find((d) => d.id === node.defId)?.ports ?? [];
-}
-
-/** Maps connected-node instanceId → IC number for I2C/SPI bus ports on this node. */
-function computeIcMap(
-  nodeId: string,
-  ports: PortDef[],
-  edges: DiagramEdge[]
-): { nodeToIc: Map<string, number>; show: boolean } {
-  const busPorts = ports.filter((p) => p.role === 'i2c' || p.role === 'spi');
-  const nodeToIc = new Map<string, number>();
-  let counter = 1;
-
-  for (const port of busPorts) {
-    const edge = edges.find(
-      (e) =>
-        (e.fromNode === nodeId && e.fromPort === port.id) ||
-        (e.toNode === nodeId && e.toPort === port.id)
-    );
-    if (!edge) continue;
-    const otherId = edge.fromNode === nodeId ? edge.toNode : edge.fromNode;
-    if (!nodeToIc.has(otherId)) nodeToIc.set(otherId, counter++);
-  }
-
-  return { nodeToIc, show: nodeToIc.size > 1 };
-}
-
-function getConnectedText(
-  nodeId: string,
-  port: PortDef,
-  edges: DiagramEdge[],
-  nodes: DiagramNode[],
-  allDefs: ComponentDef[],
-  icMap: ReturnType<typeof computeIcMap>
-): string | null {
-  const edge = edges.find(
-    (e) =>
-      (e.fromNode === nodeId && e.fromPort === port.id) ||
-      (e.toNode === nodeId && e.toPort === port.id)
-  );
-  if (!edge) return null;
-
-  const otherId = edge.fromNode === nodeId ? edge.toNode : edge.fromNode;
-  const otherPortId = edge.fromNode === nodeId ? edge.toPort : edge.fromPort;
-  const otherNode = nodes.find((n) => n.instanceId === otherId);
-  if (!otherNode) return null;
-
-  const otherPorts = getEffectivePorts(otherNode, allDefs);
-  const otherPort = otherPorts.find((p) => p.id === otherPortId);
-  const portLabel = otherPort?.label ?? otherPortId;
-  let text = `${otherNode.label} (${portLabel})`;
-
-  if (icMap.show && (port.role === 'i2c' || port.role === 'spi')) {
-    const icNum = icMap.nodeToIc.get(otherId);
-    if (icNum !== undefined) text += ` [IC ${icNum}]`;
-  }
-
-  return text;
-}
+const mono = { fontFamily: 'IBM Plex Mono, monospace' } as const;
 
 // ─── InlineEdit ───────────────────────────────────────────────────────────────
 
 function InlineEdit({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
-
-  // Keep draft in sync when value prop changes externally
-  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
 
   const commit = () => {
     const trimmed = draft.trim();
@@ -120,7 +54,7 @@ function InlineEdit({ value, onSave }: { value: string; onSave: (v: string) => v
           background: 'var(--bg-surface)',
           border: '1px solid var(--phosphor-dim)',
           color: 'var(--text-primary)',
-          fontFamily: 'IBM Plex Mono, monospace',
+          ...mono,
           fontSize: 13,
           fontWeight: 500,
           padding: '1px 5px',
@@ -136,7 +70,7 @@ function InlineEdit({ value, onSave }: { value: string; onSave: (v: string) => v
       onClick={() => { setDraft(value); setEditing(true); }}
       title="Click to rename"
       style={{
-        fontFamily: 'IBM Plex Mono, monospace',
+        ...mono,
         fontSize: 13,
         fontWeight: 500,
         color: 'var(--text-primary)',
@@ -155,74 +89,98 @@ function InlineEdit({ value, onSave }: { value: string; onSave: (v: string) => v
   );
 }
 
-// ─── PortTable ────────────────────────────────────────────────────────────────
+// ─── PortList ─────────────────────────────────────────────────────────────────
 
-function PortTable({
+function PortList({
   nodeId,
   ports,
-  edges,
-  nodes,
-  allDefs,
+  activePorts,
 }: {
   nodeId: string;
   ports: PortDef[];
-  edges: DiagramEdge[];
-  nodes: DiagramNode[];
-  allDefs: ComponentDef[];
+  activePorts: string[];
 }) {
-  const usedPortIds = new Set(
-    edges
-      .filter((e) => e.fromNode === nodeId || e.toNode === nodeId)
-      .map((e) => (e.fromNode === nodeId ? e.fromPort : e.toPort))
-  );
-
-  const icMap = computeIcMap(nodeId, ports, edges);
+  const togglePort = useDiagramStore((s) => s.togglePort);
 
   return (
-    <div className="flex-1 overflow-y-auto" style={{ fontFamily: 'IBM Plex Mono, monospace' }}>
+    <div style={{ flex: 1, overflowY: 'auto', ...mono }}>
       {/* column headers */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '44px 72px 1fr 48px',
+          gridTemplateColumns: '28px 14px 1fr 50px',
           gap: 0,
-          padding: '4px 12px',
+          padding: '3px 12px',
           borderBottom: '1px solid var(--border)',
           fontSize: 9,
           letterSpacing: '0.09em',
           color: 'var(--text-muted)',
         }}
       >
-        <span>ID</span>
-        <span>LABEL</span>
-        <span>CONNECTED TO</span>
-        <span style={{ textAlign: 'right' }}>STATUS</span>
+        <span>USE</span>
+        <span />
+        <span>PORT</span>
+        <span style={{ textAlign: 'right' }}>ID</span>
       </div>
 
       {ports.map((port) => {
-        const used = usedPortIds.has(port.id);
-        const connText = getConnectedText(nodeId, port, edges, nodes, allDefs, icMap);
-
+        const active = activePorts.includes(port.id);
         return (
           <div
             key={port.id}
+            onClick={() => togglePort(nodeId, port.id)}
             style={{
               display: 'grid',
-              gridTemplateColumns: '44px 72px 1fr 48px',
+              gridTemplateColumns: '28px 14px 1fr 50px',
               gap: 0,
               padding: '0 12px',
               height: 26,
               alignItems: 'center',
               borderBottom: '1px solid var(--border)',
-              background: used ? 'rgba(0,230,118,0.04)' : 'transparent',
-              fontSize: 11,
+              background: active ? 'rgba(0,230,118,0.05)' : 'transparent',
+              cursor: 'pointer',
             }}
           >
-            {/* port id */}
+            <input
+              type="checkbox"
+              checked={active}
+              readOnly
+              onClick={(e) => e.stopPropagation()}
+              onChange={() => togglePort(nodeId, port.id)}
+              style={{
+                accentColor: 'var(--phosphor)',
+                cursor: 'pointer',
+                margin: 0,
+                pointerEvents: 'none',
+              }}
+            />
             <span
               style={{
-                color: ROLE_COLOR[port.role] ?? 'var(--text-primary)',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: ROLE_COLOR[port.role] ?? '#888',
+                display: 'inline-block',
+                opacity: active ? 1 : 0.3,
+              }}
+            />
+            <span
+              style={{
+                fontSize: 11,
+                color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {port.label}
+            </span>
+            <span
+              style={{
+                fontSize: 9,
                 fontWeight: 600,
+                color: ROLE_COLOR[port.role] ?? 'var(--text-secondary)',
+                textAlign: 'right',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -231,47 +189,85 @@ function PortTable({
             >
               {port.id}
             </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
-            {/* label */}
-            <span
-              style={{
-                color: 'var(--text-muted)',
-                fontSize: 10,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                paddingRight: 4,
-              }}
-              title={port.label}
-            >
-              {port.label}
-            </span>
+// ─── ConnectionsSection ───────────────────────────────────────────────────────
 
-            {/* connected to */}
-            <span
-              style={{
-                color: connText ? 'var(--text-primary)' : 'var(--text-muted)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={connText ?? '—'}
-            >
-              {connText ?? '—'}
-            </span>
+function ConnectionsSection({
+  nodeId,
+  defs,
+}: {
+  nodeId: string;
+  defs: ComponentDef[];
+}) {
+  const nodes = useDiagramStore((s) => s.nodes);
+  const edges = useDiagramStore((s) => s.edges);
 
-            {/* status */}
-            <span
-              style={{
-                textAlign: 'right',
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                color: used ? 'var(--phosphor)' : 'var(--text-muted)',
-              }}
-            >
-              {used ? 'IN USE' : 'free'}
-            </span>
+  const myNode = nodes.find((n) => n.instanceId === nodeId);
+  const myTicks = myNode?.activePorts.length ?? 0;
+  const myType = myNode ? defs.find((def) => def.id === myNode.defId)?.type : undefined;
+
+  const connectedEdges = edges.filter(
+    (e) => e.fromNode === nodeId || e.toNode === nodeId
+  );
+
+  if (connectedEdges.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        borderTop: '1px solid var(--border)',
+        padding: '8px 12px',
+        ...mono,
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ fontSize: 9, letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 6 }}>
+        CONNECTIONS
+      </div>
+      {connectedEdges.map((edge) => {
+        const otherId = edge.fromNode === nodeId ? edge.toNode : edge.fromNode;
+        const other = nodes.find((n) => n.instanceId === otherId);
+        if (!other) return null;
+
+        const otherType = defs.find((def) => def.id === other.defId)?.type;
+        const otherTicks = other.activePorts.length;
+        const bothZero = myTicks === 0 && otherTicks === 0;
+        const mismatch = !bothZero && myTicks !== otherTicks;
+        const otherTickLabel = otherType === 'board' ? 'assigned pin' : 'active port';
+        const myLabel = myType === 'board' ? 'assigned' : 'active';
+        const otherLabel = otherType === 'board' ? 'board' : 'sensor';
+
+        return (
+          <div key={edge.id} style={{ marginBottom: 5 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-primary)', display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: bothZero ? 'var(--text-muted)' : mismatch ? '#f59e0b' : 'var(--phosphor)',
+                  display: 'inline-block',
+                  flexShrink: 0,
+                }}
+              />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {other.label}
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 10, flexShrink: 0 }}>
+                {otherTicks} {otherTickLabel}{otherTicks !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {mismatch && (
+              <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 3, lineHeight: 1.4 }}>
+                ⚠ Connected to {other.label}: you have {myTicks} {myLabel}, {otherLabel} has {otherTicks} {otherType === 'board' ? 'assigned' : 'active'}.
+              </div>
+            )}
           </div>
         );
       })}
@@ -290,7 +286,7 @@ const cfgInput: React.CSSProperties = {
   background: 'var(--bg-surface)',
   border: '1px solid var(--border)',
   color: 'var(--text-primary)',
-  fontFamily: 'IBM Plex Mono, monospace',
+  ...mono,
   fontSize: 11,
   padding: '3px 5px',
   outline: 'none',
@@ -319,9 +315,7 @@ function ConfigurePanel({
 
   return (
     <>
-      {/* port rows */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: '8px 10px', fontFamily: 'IBM Plex Mono, monospace' }}>
-        {/* column labels */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: '8px 10px', ...mono }}>
         <div
           style={{
             display: 'grid',
@@ -386,7 +380,7 @@ function ConfigurePanel({
             background: 'none',
             border: '1px solid var(--border)',
             color: 'var(--text-secondary)',
-            fontFamily: 'IBM Plex Mono, monospace',
+            ...mono,
             fontSize: 10,
             padding: '4px 0',
             cursor: 'pointer',
@@ -397,7 +391,6 @@ function ConfigurePanel({
         </button>
       </div>
 
-      {/* footer */}
       <div
         className="flex gap-2 border-t"
         style={{ borderColor: 'var(--border)', padding: '8px 10px', flexShrink: 0 }}
@@ -409,7 +402,7 @@ function ConfigurePanel({
             background: 'none',
             border: '1px solid var(--border)',
             color: 'var(--text-muted)',
-            fontFamily: 'IBM Plex Mono, monospace',
+            ...mono,
             fontSize: 10,
             padding: '5px 0',
             cursor: 'pointer',
@@ -419,14 +412,20 @@ function ConfigurePanel({
           CANCEL
         </button>
         <button
-          onClick={() => onApply(drafts.map(({ _key, ...p }) => p))}
+          onClick={() =>
+            onApply(drafts.map((draft) => ({
+              id: draft.id,
+              label: draft.label,
+              role: draft.role,
+            })))
+          }
           disabled={!valid}
           style={{
             flex: 2,
             background: valid ? 'var(--phosphor-mute)' : 'transparent',
             border: `1px solid ${valid ? 'var(--phosphor-dim)' : 'var(--border)'}`,
             color: valid ? 'var(--phosphor)' : 'var(--text-muted)',
-            fontFamily: 'IBM Plex Mono, monospace',
+            ...mono,
             fontSize: 10,
             fontWeight: 600,
             padding: '5px 0',
@@ -443,20 +442,20 @@ function ConfigurePanel({
 
 // ─── Inspector ────────────────────────────────────────────────────────────────
 
+function getEffectivePorts(node: DiagramNode, defs: ComponentDef[]): PortDef[] {
+  if (node.portsOverride) return node.portsOverride;
+  return defs.find((d) => d.id === node.defId)?.ports ?? [];
+}
+
 export default function Inspector() {
   const store = useDiagramStore();
   const allDefs = [...ALL_DEFS, ...store.customDefs];
 
   const node = store.nodes.find((n) => n.instanceId === store.selectedId);
   const def = node ? allDefs.find((d) => d.id === node.defId) : undefined;
-  const effectivePorts = node && def ? (node.portsOverride ?? def.ports) : [];
+  const effectivePorts = node && def ? getEffectivePorts(node, allDefs) : [];
 
-  const [configuring, setConfiguring] = useState(false);
-
-  // reset configure mode on selection change
-  useEffect(() => { setConfiguring(false); }, [store.selectedId]);
-
-  // ── placeholder ────────────────────────────────────────────────────────────
+  const [configuringForId, setConfiguringForId] = useState<string | null>(null);
 
   if (!node || !def) {
     return (
@@ -464,14 +463,15 @@ export default function Inspector() {
         className="flex items-center justify-center border-l"
         style={{ width: 280, flexShrink: 0, background: 'var(--bg-panel)', borderColor: 'var(--border)' }}
       >
-        <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, color: 'var(--text-muted)' }}>
+        <span style={{ ...mono, fontSize: 11, color: 'var(--text-muted)' }}>
           select a component
         </span>
       </aside>
     );
   }
 
-  // ── main panel ─────────────────────────────────────────────────────────────
+  const activeTicks = node.activePorts.length;
+  const configuring = configuringForId === node.instanceId;
 
   return (
     <aside
@@ -484,14 +484,14 @@ export default function Inspector() {
         style={{ borderColor: 'var(--border)', padding: '8px 12px', flexShrink: 0 }}
       >
         {configuring ? (
-          <div style={{ fontFamily: 'IBM Plex Mono, monospace' }}>
+          <div style={mono}>
             <div style={{ fontSize: 9, letterSpacing: '0.1em', color: 'var(--amber)', marginBottom: 3 }}>
               CONFIGURE PORTS
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>{node.label}</div>
           </div>
         ) : (
-          <div style={{ fontFamily: 'IBM Plex Mono, monospace' }}>
+          <div style={mono}>
             <div style={{ fontSize: 9, letterSpacing: '0.1em', color: 'var(--phosphor)', marginBottom: 3 }}>
               INSPECTOR
             </div>
@@ -503,6 +503,7 @@ export default function Inspector() {
               {def.type}
               {def.category ? ` · ${def.category}` : ''}
               {' · '}{effectivePorts.length} ports
+              {' · '}{activeTicks} active
               {node.portsOverride && (
                 <span style={{ color: 'var(--amber)', marginLeft: 4 }}>★ custom</span>
               )}
@@ -517,19 +518,19 @@ export default function Inspector() {
           effectivePorts={effectivePorts}
           onApply={(ports) => {
             store.setNodePortsOverride(node.instanceId, ports);
-            setConfiguring(false);
+            setConfiguringForId(null);
           }}
-          onCancel={() => setConfiguring(false)}
+          onCancel={() => setConfiguringForId(null)}
         />
       ) : (
         <>
-          <PortTable
+          <PortList
             nodeId={node.instanceId}
             ports={effectivePorts}
-            edges={store.edges}
-            nodes={store.nodes}
-            allDefs={allDefs}
+            activePorts={node.activePorts}
           />
+
+          <ConnectionsSection nodeId={node.instanceId} defs={allDefs} />
 
           {/* footer */}
           <div
@@ -538,13 +539,13 @@ export default function Inspector() {
           >
             {def.type === 'board' && (
               <button
-                onClick={() => setConfiguring(true)}
+                onClick={() => setConfiguringForId(node.instanceId)}
                 style={{
                   width: '100%',
                   background: 'none',
                   border: '1px solid var(--border)',
                   color: 'var(--text-secondary)',
-                  fontFamily: 'IBM Plex Mono, monospace',
+                  ...mono,
                   fontSize: 11,
                   letterSpacing: '0.06em',
                   padding: '5px 0',
@@ -562,7 +563,7 @@ export default function Inspector() {
                   background: 'none',
                   border: 'none',
                   color: 'var(--text-muted)',
-                  fontFamily: 'IBM Plex Mono, monospace',
+                  ...mono,
                   fontSize: 10,
                   padding: '4px 0',
                   cursor: 'pointer',

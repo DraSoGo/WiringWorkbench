@@ -33,16 +33,14 @@ export interface DiagramNode {
   defId: string;
   label: string;
   position: { x: number; y: number };
-  portCount?: number;
+  activePorts: string[];
   portsOverride?: PortDef[];
 }
 
 export interface DiagramEdge {
   id: string;
   fromNode: string;
-  fromPort: string;
   toNode: string;
-  toPort: string;
   label?: string;
 }
 
@@ -60,13 +58,14 @@ interface DiagramState {
   selectedId: string | null;
   history: DiagramSnapshot[];
   future: DiagramSnapshot[];
-  _loadGen: number; // incremented by loadDiagram; Canvas watches for full rf reset
+  _loadGen: number;
 
   // node actions
   addNode: (node: DiagramNode) => void;
   removeNode: (instanceId: string) => void;
   moveNode: (instanceId: string, position: { x: number; y: number }) => void;
   renameNode: (instanceId: string, label: string) => void;
+  togglePort: (instanceId: string, portId: string) => void;
 
   // edge actions
   addEdge: (edge: DiagramEdge) => void;
@@ -85,7 +84,7 @@ interface DiagramState {
   updateCustomDef: (def: ComponentDef) => void;
   removeCustomDef: (defId: string) => void;
 
-  // load (e.g. from share URL)
+  // load
   loadDiagram: (snapshot: { nodes: DiagramNode[]; edges: DiagramEdge[]; customDefs: ComponentDef[] }) => void;
 
   // history
@@ -119,29 +118,33 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
     history: [...s.history, snapshot(s)].slice(-50),
     future: [],
     nodes: s.nodes.filter((n) => n.instanceId !== instanceId),
-    edges: s.edges.filter(
-      (e) => e.fromNode !== instanceId && e.toNode !== instanceId
-    ),
+    edges: s.edges.filter((e) => e.fromNode !== instanceId && e.toNode !== instanceId),
     selectedId: s.selectedId === instanceId ? null : s.selectedId,
   })),
 
   moveNode: (instanceId, position) => set((s) => ({
-    nodes: s.nodes.map((n) =>
-      n.instanceId === instanceId ? { ...n, position } : n
-    ),
+    nodes: s.nodes.map((n) => n.instanceId === instanceId ? { ...n, position } : n),
   })),
 
   renameNode: (instanceId, label) => set((s) => ({
-    nodes: s.nodes.map((n) =>
-      n.instanceId === instanceId ? { ...n, label } : n
-    ),
+    nodes: s.nodes.map((n) => n.instanceId === instanceId ? { ...n, label } : n),
+  })),
+
+  togglePort: (instanceId, portId) => set((s) => ({
+    nodes: s.nodes.map((n) => {
+      if (n.instanceId !== instanceId) return n;
+      const active = n.activePorts.includes(portId)
+        ? n.activePorts.filter((p) => p !== portId)
+        : [...n.activePorts, portId];
+      return { ...n, activePorts: active };
+    }),
   })),
 
   addEdge: (edge) => set((s) => {
     const duplicate = s.edges.some(
       (e) =>
-        (e.fromNode === edge.fromNode && e.fromPort === edge.fromPort) ||
-        (e.toNode === edge.toNode && e.toPort === edge.toPort)
+        (e.fromNode === edge.fromNode && e.toNode === edge.toNode) ||
+        (e.fromNode === edge.toNode && e.toNode === edge.fromNode)
     );
     if (duplicate) return s;
     return {
@@ -166,14 +169,10 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   clearSelection: () => set({ selectedId: null }),
 
   setNodePortsOverride: (instanceId, ports) => set((s) => ({
-    nodes: s.nodes.map((n) =>
-      n.instanceId === instanceId ? { ...n, portsOverride: ports } : n
-    ),
+    nodes: s.nodes.map((n) => n.instanceId === instanceId ? { ...n, portsOverride: ports } : n),
   })),
 
-  addCustomDef: (def) => set((s) => ({
-    customDefs: [...s.customDefs, def],
-  })),
+  addCustomDef: (def) => set((s) => ({ customDefs: [...s.customDefs, def] })),
 
   updateCustomDef: (def) => set((s) => ({
     customDefs: s.customDefs.map((d) => (d.id === def.id ? def : d)),
@@ -183,10 +182,13 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
     customDefs: s.customDefs.filter((d) => d.id !== defId),
   })),
 
-  loadDiagram: (snapshot) => set((s) => ({
-    nodes: snapshot.nodes,
-    edges: snapshot.edges,
-    customDefs: snapshot.customDefs,
+  loadDiagram: (snap) => set((s) => ({
+    nodes: snap.nodes.map((n) => ({
+      ...n,
+      activePorts: Array.isArray(n.activePorts) ? n.activePorts : [],
+    })),
+    edges: snap.edges,
+    customDefs: snap.customDefs ?? [],
     selectedId: null,
     history: [],
     future: [],

@@ -28,9 +28,53 @@ function allDefs(customDefs: ComponentDef[]): ComponentDef[] {
   return [...ALL_DEFS, ...customDefs];
 }
 
+function definitionFor(node: DiagramNode, defs: ComponentDef[]): ComponentDef | undefined {
+  return defs.find((d) => d.id === node.defId);
+}
+
 function effectivePorts(node: DiagramNode, defs: ComponentDef[]): PortDef[] {
   if (node.portsOverride) return node.portsOverride;
   return defs.find((d) => d.id === node.defId)?.ports ?? [];
+}
+
+function orderedActivePorts(node: DiagramNode, defs: ComponentDef[]): PortDef[] {
+  const activeIds = new Set(node.activePorts);
+  return effectivePorts(node, defs).filter((port) => activeIds.has(port.id));
+}
+
+type ResolvedPair = {
+  sensorNode: DiagramNode;
+  boardNode: DiagramNode;
+  sensorPorts: PortDef[];
+  boardPorts: PortDef[];
+};
+
+function resolvePair(
+  edge: DiagramEdge,
+  nodes: DiagramNode[],
+  defs: ComponentDef[]
+): ResolvedPair | null {
+  const fromNode = nodes.find((n) => n.instanceId === edge.fromNode);
+  const toNode = nodes.find((n) => n.instanceId === edge.toNode);
+  if (!fromNode || !toNode) return null;
+
+  const fromDef = definitionFor(fromNode, defs);
+  const toDef = definitionFor(toNode, defs);
+  if (!fromDef || !toDef) return null;
+
+  const fromIsBoard = fromDef.type === 'board';
+  const toIsBoard = toDef.type === 'board';
+  if (fromIsBoard === toIsBoard) return null;
+
+  const sensorNode = fromIsBoard ? toNode : fromNode;
+  const boardNode = fromIsBoard ? fromNode : toNode;
+
+  return {
+    sensorNode,
+    boardNode,
+    sensorPorts: orderedActivePorts(sensorNode, defs),
+    boardPorts: orderedActivePorts(boardNode, defs),
+  };
 }
 
 /** Builds a per-instance unique key: "DHT11" if only one, "DHT11_1"/"DHT11_2" if multiple. */
@@ -75,14 +119,24 @@ function fromB64(b64: string): string {
  * Keys are "NodeKey.portId" for both sides.
  */
 export function exportJSON(state: ExportState): string {
+  const defs = allDefs(state.customDefs);
   const keyMap = buildKeyMap(state.nodes);
-  const result: Record<string, string> = {};
+  const result: Record<string, string | null> = {};
 
   for (const edge of state.edges) {
-    const fromKey = keyMap.get(edge.fromNode);
-    const toKey = keyMap.get(edge.toNode);
-    if (!fromKey || !toKey) continue;
-    result[`${fromKey}.${edge.fromPort}`] = `${toKey}.${edge.toPort}`;
+    const pair = resolvePair(edge, state.nodes, defs);
+    if (!pair) continue;
+
+    const sensorKey = keyMap.get(pair.sensorNode.instanceId);
+    const boardKey = keyMap.get(pair.boardNode.instanceId);
+    if (!sensorKey || !boardKey) continue;
+
+    pair.sensorPorts.forEach((sensorPort, index) => {
+      const boardPort = pair.boardPorts[index];
+      result[`${sensorKey}.${sensorPort.id}`] = boardPort
+        ? `${boardKey}.${boardPort.id}`
+        : null;
+    });
   }
 
   return JSON.stringify(result, null, 2);
@@ -118,32 +172,18 @@ export function exportArduinoStub(state: ExportState): string {
   const defineLines: string[] = [];
 
   for (const edge of state.edges) {
-    const fromNode = state.nodes.find((n) => n.instanceId === edge.fromNode);
-    const toNode = state.nodes.find((n) => n.instanceId === edge.toNode);
-    if (!fromNode || !toNode) continue;
+    const pair = resolvePair(edge, state.nodes, defs);
+    if (!pair) continue;
 
-    const fromDef = defs.find((d) => d.id === fromNode.defId);
-    const toDef = defs.find((d) => d.id === toNode.defId);
-    const fromIsBoard = fromDef?.type === 'board';
-    const toIsBoard = toDef?.type === 'board';
+    const nodeKey = keyMap.get(pair.sensorNode.instanceId) ?? sanitize(pair.sensorNode.label);
+    pair.sensorPorts.forEach((sensorPort, index) => {
+      const boardPort = pair.boardPorts[index];
+      if (!boardPort) return;
 
-    // only sensor↔board edges
-    if (fromIsBoard === toIsBoard) continue;
-
-    const sensorNode = fromIsBoard ? toNode : fromNode;
-    const sensorPortId = fromIsBoard ? edge.toPort : edge.fromPort;
-    const boardPortId = fromIsBoard ? edge.fromPort : edge.toPort;
-
-    // skip power/gnd ports
-    const sensorPorts = effectivePorts(sensorNode, defs);
-    const sensorPort = sensorPorts.find((p) => p.id === sensorPortId);
-    if (sensorPort?.role === 'power' || sensorPort?.role === 'gnd') continue;
-
-    const nodeKey = keyMap.get(sensorNode.instanceId) ?? sanitize(sensorNode.label);
-    const defineName = `${nodeKey}_${sanitize(sensorPortId)}`;
-    const pin = pinValue(boardPortId);
-
-    defineLines.push(`#define ${defineName.padEnd(28)} ${pin}`);
+      const defineName = `${nodeKey}_${sanitize(sensorPort.id)}`;
+      const pin = pinValue(boardPort.id);
+      defineLines.push(`#define ${defineName.padEnd(28)} ${pin}`);
+    });
   }
 
   if (defineLines.length) {

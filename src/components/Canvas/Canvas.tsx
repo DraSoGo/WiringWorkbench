@@ -17,16 +17,24 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type NodeTypes,
+  type EdgeTypes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useDiagramStore, type DiagramNode, type PortRole } from '../../store/diagram';
+import {
+  useDiagramStore,
+  type ComponentDef,
+  type DiagramEdge,
+  type DiagramNode,
+} from '../../store/diagram';
 import { BOARDS } from '../../data/boards';
 import { SENSORS } from '../../data/sensors';
 import ComponentNode, { type ComponentNodeData } from './ComponentNode';
+import WireEdge from './WireEdge';
 
 const ALL_DEFS = [...BOARDS, ...SENSORS];
 const NODE_TYPES: NodeTypes = { componentNode: ComponentNode };
+const EDGE_TYPES: EdgeTypes = { wireEdge: WireEdge };
 
 const LABEL_STYLE = {
   fontFamily: 'IBM Plex Mono, monospace',
@@ -38,26 +46,13 @@ const LABEL_BG_STYLE = { fill: 'var(--bg-surface)', fillOpacity: 0.9 } as const;
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function getPortRole(nodeId: string, portId: string, nodes: Node[]): PortRole | undefined {
-  const node = nodes.find((n) => n.id === nodeId);
-  if (!node) return undefined;
-  const def = (node.data as ComponentNodeData).def;
-  return def?.ports.find((p) => p.id === portId)?.role;
-}
-
-function portAlreadyUsed(nodeId: string, portId: string, edges: Edge[]): boolean {
-  return edges.some(
-    (e) =>
-      (e.source === nodeId && e.sourceHandle === portId) ||
-      (e.target === nodeId && e.targetHandle === portId)
-  );
-}
+type RuntimeNodeData = Pick<ComponentNodeData, 'connectArmed' | 'onStartConnect'>;
 
 function buildRfNode(
   storeNode: DiagramNode,
-  usedPorts: Set<string>,
-  extraDefs: typeof ALL_DEFS = []
-): Node {
+  extraDefs: ComponentDef[],
+  runtime: RuntimeNodeData
+): Node<ComponentNodeData> {
   const def = [...ALL_DEFS, ...extraDefs].find((d) => d.id === storeNode.defId);
   if (!def) throw new Error(`Unknown defId: ${storeNode.defId}`);
   const effectiveDef = storeNode.portsOverride ? { ...def, ports: storeNode.portsOverride } : def;
@@ -65,19 +60,37 @@ function buildRfNode(
     id: storeNode.instanceId,
     type: 'componentNode',
     position: storeNode.position,
-    data: { def: effectiveDef, label: storeNode.label, usedPorts } satisfies ComponentNodeData,
+    dragHandle: '.node-drag-handle',
+    data: {
+      def: effectiveDef,
+      label: storeNode.label,
+      connectArmed: runtime.connectArmed,
+      onStartConnect: runtime.onStartConnect,
+    } satisfies ComponentNodeData,
   };
 }
 
-function recomputeUsedPorts(edges: Edge[]): Map<string, Set<string>> {
-  const map = new Map<string, Set<string>>();
-  for (const e of edges) {
-    if (!map.has(e.source)) map.set(e.source, new Set());
-    if (!map.has(e.target)) map.set(e.target, new Set());
-    if (e.sourceHandle) map.get(e.source)!.add(e.sourceHandle);
-    if (e.targetHandle) map.get(e.target)!.add(e.targetHandle);
+function buildRfEdge(edge: DiagramEdge): Edge {
+  const rfEdge: Edge = {
+    id: edge.id,
+    source: edge.fromNode,
+    target: edge.toNode,
+    sourceHandle: 'center',
+    targetHandle: 'center',
+    type: 'wireEdge',
+    label: edge.label ?? '',
+  };
+
+  if (edge.label?.trim()) {
+    rfEdge.labelStyle = LABEL_STYLE;
+    rfEdge.labelBgStyle = LABEL_BG_STYLE;
   }
-  return map;
+
+  return rfEdge;
+}
+
+function nodeTypeFor(node: DiagramNode, defs: ComponentDef[]): ComponentDef['type'] | null {
+  return defs.find((def) => def.id === node.defId)?.type ?? null;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -117,11 +130,9 @@ function CanvasInner() {
   const [rfEdges, setRfEdges, onRfEdgesChange] = useEdgesState<Edge>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [labelEditor, setLabelEditor] = useState<LabelEditor | null>(null);
+  const [pendingConnectionSource, setPendingConnectionSource] = useState<string | null>(null);
 
-  // Refs so callbacks stay stable without stale closures
-  const rfNodesRef = useRef(rfNodes);
   const rfEdgesRef = useRef(rfEdges);
-  useEffect(() => { rfNodesRef.current = rfNodes; }, [rfNodes]);
   useEffect(() => { rfEdgesRef.current = rfEdges; }, [rfEdges]);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -134,25 +145,67 @@ function CanvasInner() {
     toastTimer.current = setTimeout(() => setToast(null), 2500);
   }, []);
 
-  // ── full reset on loadDiagram (share URL, future open-file) ─────────────────
+  const startConnectFromNode = useCallback((nodeId: string) => {
+    if (pendingConnectionSource === nodeId) {
+      setPendingConnectionSource(null);
+      return;
+    }
+    setPendingConnectionSource(nodeId);
+    showToast('Click a target node');
+  }, [pendingConnectionSource, showToast]);
+
+  const attemptConnection = useCallback((sourceId: string, targetId: string): boolean => {
+    if (sourceId === targetId) return false;
+
+    const sourceNode = store.nodes.find((node) => node.instanceId === sourceId);
+    const targetNode = store.nodes.find((node) => node.instanceId === targetId);
+    if (!sourceNode || !targetNode) return false;
+
+    const allDefs = [...ALL_DEFS, ...store.customDefs];
+    const sourceIsBoard = nodeTypeFor(sourceNode, allDefs) === 'board';
+    const targetIsBoard = nodeTypeFor(targetNode, allDefs) === 'board';
+    if (sourceIsBoard === targetIsBoard) {
+      showToast('Connect a board to a sensor');
+      return false;
+    }
+
+    const alreadyConnected = rfEdgesRef.current.some(
+      (edge) =>
+        (edge.source === sourceId && edge.target === targetId) ||
+        (edge.source === targetId && edge.target === sourceId)
+    );
+    if (alreadyConnected) {
+      showToast('Already connected');
+      return false;
+    }
+
+    const edge: DiagramEdge = {
+      id: `${sourceId}→${targetId}`,
+      fromNode: sourceId,
+      toNode: targetId,
+    };
+    setRfEdges((prev) => rfAddEdge(buildRfEdge(edge), prev));
+    store.addEdge(edge);
+    return true;
+  }, [setRfEdges, showToast, store]);
+
+  // ── full reset on loadDiagram ────────────────────────────────────────────────
 
   useEffect(() => {
-    if (store._loadGen === 0) return; // skip initial mount
-    const newNodes = store.nodes.map((n) => buildRfNode(n, new Set(), store.customDefs));
-    const newEdges = store.edges.map((e) => ({
-      id: e.id,
-      source: e.fromNode,
-      sourceHandle: e.fromPort,
-      target: e.toNode,
-      targetHandle: e.toPort,
-      label: e.label ?? '',
-    }));
+    if (store._loadGen === 0) return;
+    const newNodes = store.nodes.map((node) =>
+      buildRfNode(node, store.customDefs, {
+        connectArmed: pendingConnectionSource === node.instanceId,
+        onStartConnect: startConnectFromNode,
+      })
+    );
+    const newEdges = store.edges.map(buildRfEdge);
     setRfNodes(newNodes);
     setRfEdges(newEdges);
     knownIds.current = new Set(store.nodes.map((n) => n.instanceId));
   }, [store._loadGen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── sync store → rf (undo/redo, external adds/removes) ────────────────────
+  // ── sync store → rf (undo/redo, external adds/removes) ──────────────────────
 
   useEffect(() => {
     const storeIds = new Set(store.nodes.map((n) => n.instanceId));
@@ -161,40 +214,38 @@ function CanvasInner() {
     const addedIds = new Set(added.map((n) => n.instanceId));
 
     setRfNodes((prev) => {
-      // remove deleted nodes
       let next = prev.filter((n) => !removedIds.includes(n.id));
-      // add new nodes
-      for (const n of added) next = [...next, buildRfNode(n, new Set(), store.customDefs)];
-      // patch existing nodes: label and portsOverride may have changed
+      for (const node of added) {
+        next = [...next, buildRfNode(node, store.customDefs, {
+          connectArmed: pendingConnectionSource === node.instanceId,
+          onStartConnect: startConnectFromNode,
+        })];
+      }
       next = next.map((rfNode) => {
         if (addedIds.has(rfNode.id)) return rfNode;
-        const sn = store.nodes.find((n) => n.instanceId === rfNode.id);
-        if (!sn) return rfNode;
-        const baseDef = [...ALL_DEFS, ...store.customDefs].find((d) => d.id === sn.defId);
-        if (!baseDef) return rfNode;
-        const effectiveDef = sn.portsOverride ? { ...baseDef, ports: sn.portsOverride } : baseDef;
-        const cur = rfNode.data as ComponentNodeData;
-        if (cur.label === sn.label && cur.def === effectiveDef) return rfNode;
-        return { ...rfNode, data: { ...rfNode.data, def: effectiveDef, label: sn.label } };
+        const storeNode = store.nodes.find((node) => node.instanceId === rfNode.id);
+        if (!storeNode) return rfNode;
+        const builtNode = buildRfNode(storeNode, store.customDefs, {
+          connectArmed: pendingConnectionSource === storeNode.instanceId,
+          onStartConnect: startConnectFromNode,
+        });
+        return {
+          ...rfNode,
+          position: storeNode.position,
+          dragHandle: builtNode.dragHandle,
+          data: builtNode.data,
+        };
       });
       return next;
     });
     knownIds.current = storeIds;
-  }, [store.nodes]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── refresh usedPorts when edges change ───────────────────────────────────
+  }, [pendingConnectionSource, setRfNodes, startConnectFromNode, store.customDefs, store.nodes]);
 
   useEffect(() => {
-    const usedMap = recomputeUsedPorts(rfEdges);
-    setRfNodes((prev) =>
-      prev.map((n) => ({
-        ...n,
-        data: { ...n.data, usedPorts: usedMap.get(n.id) ?? new Set<string>() },
-      }))
-    );
-  }, [rfEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+    setRfEdges(store.edges.map(buildRfEdge));
+  }, [setRfEdges, store.edges]);
 
-  // ── mirror selection from store → rf ─────────────────────────────────────
+  // ── mirror selection from store → rf ────────────────────────────────────────
 
   useEffect(() => {
     setRfNodes((prev) =>
@@ -202,7 +253,7 @@ function CanvasInner() {
     );
   }, [store.selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── event handlers ────────────────────────────────────────────────────────
+  // ── event handlers ───────────────────────────────────────────────────────────
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
@@ -227,39 +278,22 @@ function CanvasInner() {
 
   const onConnect: OnConnect = useCallback(
     (connection) => {
-      const { source, target, sourceHandle, targetHandle } = connection;
-      if (!source || !target || !sourceHandle || !targetHandle) return;
-      // prevent self-connection
-      if (source === target) return;
-
-      const nodes = rfNodesRef.current;
-      const edges = rfEdgesRef.current;
-
-      const srcRole = getPortRole(source, sourceHandle, nodes);
-      const tgtRole = getPortRole(target, targetHandle, nodes);
-      const srcFanOut = srcRole === 'power' || srcRole === 'gnd';
-      const tgtFanOut = tgtRole === 'power' || tgtRole === 'gnd';
-
-      if (!srcFanOut && portAlreadyUsed(source, sourceHandle, edges)) {
-        showToast(`${sourceHandle} already connected`);
-        return;
-      }
-      if (!tgtFanOut && portAlreadyUsed(target, targetHandle, edges)) {
-        showToast(`${targetHandle} already connected`);
-        return;
-      }
-
-      const id = `${source}:${sourceHandle}→${target}:${targetHandle}`;
-      const rfEdge: Edge = { id, source, sourceHandle, target, targetHandle };
-      setRfEdges((prev) => rfAddEdge(rfEdge, prev));
-      store.addEdge({ id, fromNode: source, fromPort: sourceHandle, toNode: target, toPort: targetHandle });
+      const { source, target } = connection;
+      if (!source || !target) return;
+      attemptConnection(source, target);
     },
-    [setRfEdges, store, showToast]
+    [attemptConnection]
   );
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (pendingConnectionSource && pendingConnectionSource !== node.id) {
+      if (attemptConnection(pendingConnectionSource, node.id)) {
+        setPendingConnectionSource(null);
+      }
+      return;
+    }
     store.selectNode(node.id);
-  }, [store]);
+  }, [attemptConnection, pendingConnectionSource, store]);
 
   const onEdgeClick = useCallback(() => {
     store.clearSelection();
@@ -268,6 +302,7 @@ function CanvasInner() {
   const onPaneClick = useCallback(() => {
     store.clearSelection();
     setLabelEditor(null);
+    setPendingConnectionSource(null);
   }, [store]);
 
   const onEdgeDoubleClick = useCallback((e: React.MouseEvent, edge: Edge) => {
@@ -312,11 +347,21 @@ function CanvasInner() {
       if (!def) return;
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const instanceId = crypto.randomUUID();
-      setRfNodes((prev) => [...prev, buildRfNode({ instanceId, defId: def.id, label: def.name, position }, new Set(), store.customDefs)]);
-      store.addNode({ instanceId, defId: def.id, label: def.name, position });
+      const newNode: DiagramNode = {
+        instanceId,
+        defId: def.id,
+        label: def.name,
+        position,
+        activePorts: [],
+      };
+      setRfNodes((prev) => [...prev, buildRfNode(newNode, store.customDefs, {
+        connectArmed: false,
+        onStartConnect: startConnectFromNode,
+      })]);
+      store.addNode(newNode);
       knownIds.current.add(instanceId);
     },
-    [screenToFlowPosition, setRfNodes, store]
+    [screenToFlowPosition, setRfNodes, startConnectFromNode, store]
   );
 
   return (
@@ -325,6 +370,7 @@ function CanvasInner() {
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

@@ -59,7 +59,11 @@ export default function ComponentModal({ initial, onSave, onClose }: Props) {
       id: initial?.id ?? crypto.randomUUID(),
       name: name.trim(),
       type,
-      ports: ports.map(({ _key, ...p }) => p),
+      ports: ports.map((port) => ({
+        id: port.id,
+        label: port.label,
+        role: port.role,
+      })),
     });
   };
 
