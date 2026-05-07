@@ -353,6 +353,7 @@ function CanvasInner() {
         label: def.name,
         position,
         activePorts: [],
+        portCounts: {},
       };
       setRfNodes((prev) => [...prev, buildRfNode(newNode, store.customDefs, {
         connectArmed: false,

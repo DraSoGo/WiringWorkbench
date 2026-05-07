@@ -2,12 +2,19 @@ import { useState } from 'react';
 import {
   useDiagramStore,
   type ComponentDef,
-  type DiagramNode,
   type PortDef,
   type PortRole,
 } from '../../store/diagram';
 import { BOARDS } from '../../data/boards';
 import { SENSORS } from '../../data/sensors';
+import {
+  analyzeBoardAssignments,
+  analyzeEdgeAssignment,
+  formatPortMapping,
+  getEffectivePorts,
+  getPortCount,
+  getTotalAssignedPorts,
+} from '../../lib/portMapping';
 
 const ALL_DEFS: ComponentDef[] = [...BOARDS, ...SENSORS];
 const PORT_ROLES: PortRole[] = ['digital', 'analog', 'power', 'gnd', 'i2c', 'spi', 'uart', 'pwm', 'custom'];
@@ -93,14 +100,21 @@ function InlineEdit({ value, onSave }: { value: string; onSave: (v: string) => v
 
 function PortList({
   nodeId,
+  nodeType,
   ports,
-  activePorts,
+  counts,
 }: {
   nodeId: string;
+  nodeType: ComponentDef['type'];
   ports: PortDef[];
-  activePorts: string[];
+  counts: Record<string, number>;
 }) {
   const togglePort = useDiagramStore((s) => s.togglePort);
+  const setPortCount = useDiagramStore((s) => s.setPortCount);
+  const boardMode = nodeType === 'board';
+  const gridTemplateColumns = boardMode
+    ? '28px 14px minmax(0,1fr) 58px 44px'
+    : '28px 14px 1fr 50px';
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', ...mono }}>
@@ -108,7 +122,7 @@ function PortList({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '28px 14px 1fr 50px',
+          gridTemplateColumns,
           gap: 0,
           padding: '3px 12px',
           borderBottom: '1px solid var(--border)',
@@ -120,18 +134,20 @@ function PortList({
         <span>USE</span>
         <span />
         <span>PORT</span>
+        {boardMode && <span style={{ textAlign: 'center' }}>QTY</span>}
         <span style={{ textAlign: 'right' }}>ID</span>
       </div>
 
       {ports.map((port) => {
-        const active = activePorts.includes(port.id);
+        const count = counts[port.id] ?? 0;
+        const active = count > 0;
         return (
           <div
             key={port.id}
             onClick={() => togglePort(nodeId, port.id)}
             style={{
               display: 'grid',
-              gridTemplateColumns: '28px 14px 1fr 50px',
+              gridTemplateColumns,
               gap: 0,
               padding: '0 12px',
               height: 26,
@@ -172,9 +188,66 @@ function PortList({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
-            >
-              {port.label}
-            </span>
+              >
+                {port.label}
+              </span>
+            {boardMode && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 3,
+                }}
+              >
+                <button
+                  onClick={() => setPortCount(nodeId, port.id, count - 1)}
+                  disabled={!active}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    background: 'var(--bg-panel)',
+                    border: '1px solid var(--border)',
+                    color: active ? 'var(--text-secondary)' : 'var(--text-muted)',
+                    cursor: active ? 'pointer' : 'not-allowed',
+                    fontSize: 10,
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                  title={`Remove one mapping from ${port.id}`}
+                >
+                  -
+                </button>
+                <span
+                  style={{
+                    minWidth: 10,
+                    fontSize: 10,
+                    color: active ? 'var(--phosphor)' : 'var(--text-muted)',
+                    textAlign: 'center',
+                  }}
+                >
+                  {count}
+                </span>
+                <button
+                  onClick={() => setPortCount(nodeId, port.id, active ? count + 1 : 1)}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    background: 'var(--bg-panel)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontSize: 10,
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                  title={`Add one mapping to ${port.id}`}
+                >
+                  +
+                </button>
+              </div>
+            )}
             <span
               style={{
                 fontSize: 9,
@@ -209,8 +282,11 @@ function ConnectionsSection({
   const edges = useDiagramStore((s) => s.edges);
 
   const myNode = nodes.find((n) => n.instanceId === nodeId);
-  const myTicks = myNode?.activePorts.length ?? 0;
+  const myTicks = myNode ? getTotalAssignedPorts(myNode) : 0;
   const myType = myNode ? defs.find((def) => def.id === myNode.defId)?.type : undefined;
+  const boardSummary = myType === 'board'
+    ? analyzeBoardAssignments(nodeId, nodes, edges, defs)
+    : null;
 
   const connectedEdges = edges.filter(
     (e) => e.fromNode === nodeId || e.toNode === nodeId
@@ -235,13 +311,18 @@ function ConnectionsSection({
         const other = nodes.find((n) => n.instanceId === otherId);
         if (!other) return null;
 
+        const assignment = analyzeEdgeAssignment(edge.id, nodes, edges, defs);
+        if (!assignment) return null;
+
         const otherType = defs.find((def) => def.id === other.defId)?.type;
-        const otherTicks = other.activePorts.length;
-        const bothZero = myTicks === 0 && otherTicks === 0;
-        const mismatch = !bothZero && myTicks !== otherTicks;
-        const otherTickLabel = otherType === 'board' ? 'assigned pin' : 'active port';
+        const otherTicks = otherType === 'board'
+          ? assignment.boardPortSlots.length
+          : assignment.sensorPorts.length;
+        const bothZero = assignment.sensorPorts.length === 0 && assignment.boardPortSlots.length === 0;
+        const mismatch = !bothZero && assignment.aggregateMismatch;
+        const otherTickLabel = otherType === 'board' ? 'assigned slot' : 'active port';
         const myLabel = myType === 'board' ? 'assigned' : 'active';
-        const otherLabel = otherType === 'board' ? 'board' : 'sensor';
+        const mapping = formatPortMapping(assignment);
 
         return (
           <div key={edge.id} style={{ marginBottom: 5 }}>
@@ -263,9 +344,16 @@ function ConnectionsSection({
                 {otherTicks} {otherTickLabel}{otherTicks !== 1 ? 's' : ''}
               </span>
             </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+              {mapping}
+            </div>
             {mismatch && (
               <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 3, lineHeight: 1.4 }}>
-                ⚠ Connected to {other.label}: you have {myTicks} {myLabel}, {otherLabel} has {otherTicks} {otherType === 'board' ? 'assigned' : 'active'}.
+                {myType === 'board'
+                  ? `Connected set uses ${boardSummary?.totalSensorPorts ?? 0} sensor ports, but this board has ${boardSummary?.boardPortSlots.length ?? 0} assigned slots.`
+                  : assignment.missingBoardSlots
+                  ? `Connected to ${other.label}: you have ${myTicks} ${myLabel}, but the board is short by ${assignment.missingBoardSlots} slot${assignment.missingBoardSlots !== 1 ? 's' : ''}.`
+                  : `Connected to ${other.label}: the board has ${assignment.extraBoardSlots} extra assigned slot${assignment.extraBoardSlots !== 1 ? 's' : ''}. Reduce the board count or activate more sensor ports.`}
               </div>
             )}
           </div>
@@ -440,13 +528,6 @@ function ConfigurePanel({
   );
 }
 
-// ─── Inspector ────────────────────────────────────────────────────────────────
-
-function getEffectivePorts(node: DiagramNode, defs: ComponentDef[]): PortDef[] {
-  if (node.portsOverride) return node.portsOverride;
-  return defs.find((d) => d.id === node.defId)?.ports ?? [];
-}
-
 export default function Inspector() {
   const store = useDiagramStore();
   const allDefs = [...ALL_DEFS, ...store.customDefs];
@@ -470,8 +551,12 @@ export default function Inspector() {
     );
   }
 
-  const activeTicks = node.activePorts.length;
+  const activeTicks = getTotalAssignedPorts(node);
   const configuring = configuringForId === node.instanceId;
+  const portCounts = Object.fromEntries(
+    effectivePorts.map((port) => [port.id, getPortCount(node, port.id)])
+  );
+  const defaultPorts = def.ports;
 
   return (
     <aside
@@ -503,7 +588,7 @@ export default function Inspector() {
               {def.type}
               {def.category ? ` · ${def.category}` : ''}
               {' · '}{effectivePorts.length} ports
-              {' · '}{activeTicks} active
+              {' · '}{activeTicks} {def.type === 'board' ? 'assigned' : 'active'}
               {node.portsOverride && (
                 <span style={{ color: 'var(--amber)', marginLeft: 4 }}>★ custom</span>
               )}
@@ -514,20 +599,25 @@ export default function Inspector() {
 
       {/* body */}
       {configuring ? (
-        <ConfigurePanel
-          effectivePorts={effectivePorts}
-          onApply={(ports) => {
-            store.setNodePortsOverride(node.instanceId, ports);
-            setConfiguringForId(null);
-          }}
+          <ConfigurePanel
+            effectivePorts={effectivePorts}
+            onApply={(ports) => {
+              store.setNodePortsOverride(
+                node.instanceId,
+                ports,
+                ports.map((port) => port.id)
+              );
+              setConfiguringForId(null);
+            }}
           onCancel={() => setConfiguringForId(null)}
         />
       ) : (
         <>
           <PortList
             nodeId={node.instanceId}
+            nodeType={def.type}
             ports={effectivePorts}
-            activePorts={node.activePorts}
+            counts={portCounts}
           />
 
           <ConnectionsSection nodeId={node.instanceId} defs={allDefs} />
@@ -537,27 +627,29 @@ export default function Inspector() {
             className="border-t"
             style={{ borderColor: 'var(--border)', padding: '8px 12px', flexShrink: 0 }}
           >
-            {def.type === 'board' && (
-              <button
-                onClick={() => setConfiguringForId(node.instanceId)}
-                style={{
-                  width: '100%',
-                  background: 'none',
-                  border: '1px solid var(--border)',
-                  color: 'var(--text-secondary)',
-                  ...mono,
-                  fontSize: 11,
-                  letterSpacing: '0.06em',
-                  padding: '5px 0',
-                  cursor: 'pointer',
-                }}
-              >
-                CONFIGURE PORTS
-              </button>
-            )}
+            <button
+              onClick={() => setConfiguringForId(node.instanceId)}
+              style={{
+                width: '100%',
+                background: 'none',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+                ...mono,
+                fontSize: 11,
+                letterSpacing: '0.06em',
+                padding: '5px 0',
+                cursor: 'pointer',
+              }}
+            >
+              CONFIGURE PORTS
+            </button>
             {node.portsOverride && (
               <button
-                onClick={() => store.setNodePortsOverride(node.instanceId, undefined)}
+                onClick={() => store.setNodePortsOverride(
+                  node.instanceId,
+                  undefined,
+                  defaultPorts.map((port) => port.id)
+                )}
                 style={{
                   width: '100%',
                   background: 'none',
@@ -568,7 +660,7 @@ export default function Inspector() {
                   padding: '4px 0',
                   cursor: 'pointer',
                   letterSpacing: '0.04em',
-                  marginTop: def.type === 'board' ? 4 : 0,
+                  marginTop: 4,
                 }}
               >
                 reset to default ports

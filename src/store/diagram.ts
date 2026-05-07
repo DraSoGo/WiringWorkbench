@@ -34,6 +34,7 @@ export interface DiagramNode {
   label: string;
   position: { x: number; y: number };
   activePorts: string[];
+  portCounts?: Record<string, number>;
   portsOverride?: PortDef[];
 }
 
@@ -66,6 +67,7 @@ interface DiagramState {
   moveNode: (instanceId: string, position: { x: number; y: number }) => void;
   renameNode: (instanceId: string, label: string) => void;
   togglePort: (instanceId: string, portId: string) => void;
+  setPortCount: (instanceId: string, portId: string, count: number) => void;
 
   // edge actions
   addEdge: (edge: DiagramEdge) => void;
@@ -77,7 +79,7 @@ interface DiagramState {
   clearSelection: () => void;
 
   // node port overrides
-  setNodePortsOverride: (instanceId: string, ports: PortDef[] | undefined) => void;
+  setNodePortsOverride: (instanceId: string, ports: PortDef[] | undefined, allowedPortIds?: string[]) => void;
 
   // custom defs
   addCustomDef: (def: ComponentDef) => void;
@@ -96,6 +98,75 @@ function snapshot(state: DiagramState): DiagramSnapshot {
   return {
     nodes: [...state.nodes],
     edges: [...state.edges],
+  };
+}
+
+function normalizePortState(
+  activePorts: unknown,
+  portCounts: unknown
+): Pick<DiagramNode, 'activePorts' | 'portCounts'> {
+  const counts: Record<string, number> = {};
+
+  if (portCounts && typeof portCounts === 'object') {
+    for (const [portId, rawCount] of Object.entries(portCounts)) {
+      const count = Math.max(0, Math.floor(Number(rawCount) || 0));
+      if (count > 0) counts[portId] = count;
+    }
+  }
+
+  if (Array.isArray(activePorts)) {
+    for (const portId of activePorts) {
+      if (typeof portId !== 'string' || !portId.trim()) continue;
+      counts[portId] = Math.max(counts[portId] ?? 0, 1);
+    }
+  }
+
+  return {
+    activePorts: Object.keys(counts),
+    portCounts: counts,
+  };
+}
+
+function withPortCount(
+  node: DiagramNode,
+  portId: string,
+  count: number
+): DiagramNode {
+  const nextCount = Math.max(0, Math.floor(count));
+  const nextCounts = { ...(node.portCounts ?? {}) };
+
+  if (nextCount > 0) nextCounts[portId] = nextCount;
+  else delete nextCounts[portId];
+
+  const nextActivePorts = Array.from(
+    new Set(
+      nextCount > 0
+        ? [...node.activePorts.filter((id) => id !== portId), portId]
+        : node.activePorts.filter((id) => id !== portId)
+    )
+  );
+
+  return {
+    ...node,
+    activePorts: nextActivePorts,
+    portCounts: nextCounts,
+  };
+}
+
+function prunePorts(
+  node: DiagramNode,
+  allowedPortIds: string[] | undefined
+): DiagramNode {
+  if (!allowedPortIds) return node;
+  const allowed = new Set(allowedPortIds);
+  const nextCounts = Object.fromEntries(
+    Object.entries(node.portCounts ?? {}).filter(([portId, count]) => allowed.has(portId) && count > 0)
+  );
+
+  return {
+    ...node,
+    activePorts: node.activePorts.filter((portId) => allowed.has(portId)),
+    portCounts: nextCounts,
   };
 }
 
@@ -133,11 +204,15 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   togglePort: (instanceId, portId) => set((s) => ({
     nodes: s.nodes.map((n) => {
       if (n.instanceId !== instanceId) return n;
-      const active = n.activePorts.includes(portId)
-        ? n.activePorts.filter((p) => p !== portId)
-        : [...n.activePorts, portId];
-      return { ...n, activePorts: active };
+      const currentCount = n.portCounts?.[portId] ?? (n.activePorts.includes(portId) ? 1 : 0);
+      return withPortCount(n, portId, currentCount > 0 ? 0 : 1);
     }),
+  })),
+
+  setPortCount: (instanceId, portId, count) => set((s) => ({
+    nodes: s.nodes.map((n) => (
+      n.instanceId === instanceId ? withPortCount(n, portId, count) : n
+    )),
   })),
 
   addEdge: (edge) => set((s) => {
@@ -168,8 +243,11 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
 
   clearSelection: () => set({ selectedId: null }),
 
-  setNodePortsOverride: (instanceId, ports) => set((s) => ({
-    nodes: s.nodes.map((n) => n.instanceId === instanceId ? { ...n, portsOverride: ports } : n),
+  setNodePortsOverride: (instanceId, ports, allowedPortIds) => set((s) => ({
+    nodes: s.nodes.map((n) => {
+      if (n.instanceId !== instanceId) return n;
+      return prunePorts({ ...n, portsOverride: ports }, allowedPortIds);
+    }),
   })),
 
   addCustomDef: (def) => set((s) => ({ customDefs: [...s.customDefs, def] })),
@@ -185,7 +263,7 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   loadDiagram: (snap) => set((s) => ({
     nodes: snap.nodes.map((n) => ({
       ...n,
-      activePorts: Array.isArray(n.activePorts) ? n.activePorts : [],
+      ...normalizePortState(n.activePorts, n.portCounts),
     })),
     edges: snap.edges,
     customDefs: snap.customDefs ?? [],

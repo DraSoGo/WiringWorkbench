@@ -5,21 +5,15 @@ import {
   getBezierPath,
   type EdgeProps,
 } from '@xyflow/react';
-import { useDiagramStore, type ComponentDef, type DiagramNode } from '../../store/diagram';
+import { useDiagramStore } from '../../store/diagram';
 import { BOARDS } from '../../data/boards';
 import { SENSORS } from '../../data/sensors';
+import { analyzeEdgeAssignment } from '../../lib/portMapping';
 
 const mono = { fontFamily: 'IBM Plex Mono, monospace' } as const;
 
-function nodeTypeFor(node: DiagramNode | undefined, defs: ComponentDef[]): ComponentDef['type'] | null {
-  if (!node) return null;
-  return defs.find((def) => def.id === node.defId)?.type ?? null;
-}
-
 export default function WireEdge({
   id,
-  source,
-  target,
   sourceX,
   sourceY,
   targetX,
@@ -33,21 +27,19 @@ export default function WireEdge({
   const [tipOpen, setTipOpen] = useState(false);
   const nodes = useDiagramStore((s) => s.nodes);
   const customDefs = useDiagramStore((s) => s.customDefs);
+  const edges = useDiagramStore((s) => s.edges);
   const defs = [...BOARDS, ...SENSORS, ...customDefs];
 
-  const srcNode = nodes.find((n) => n.instanceId === source);
-  const tgtNode = nodes.find((n) => n.instanceId === target);
-  const srcTicks = srcNode?.activePorts.length ?? 0;
-  const tgtTicks = tgtNode?.activePorts.length ?? 0;
-  const srcIsBoard = nodeTypeFor(srcNode, defs) === 'board';
-  const sensorNode = srcIsBoard ? tgtNode : srcNode;
-  const boardNode = srcIsBoard ? srcNode : tgtNode;
-  const sensorTicks = srcIsBoard ? tgtTicks : srcTicks;
-  const boardTicks = srcIsBoard ? srcTicks : tgtTicks;
+  const assignment = analyzeEdgeAssignment(id, nodes, edges, defs);
+  const sensorNode = assignment?.sensorNode;
+  const boardNode = assignment?.boardNode;
+  const sensorTicks = assignment?.sensorPorts.length ?? 0;
+  const boardTotal = assignment?.boardPortSlots.length ?? 0;
+  const sensorTotal = assignment?.totalSensorPorts ?? 0;
 
-  const bothZero = srcTicks === 0 && tgtTicks === 0;
-  const mismatch = !bothZero && srcTicks !== tgtTicks;
-  const matched = !bothZero && srcTicks === tgtTicks;
+  const bothZero = sensorTicks === 0 && boardTotal === 0;
+  const mismatch = !!assignment && !bothZero && assignment.aggregateMismatch;
+  const matched = !!assignment && !bothZero && !assignment.aggregateMismatch;
 
   const edgeColor = bothZero
     ? 'var(--edge-color)'
@@ -143,8 +135,14 @@ export default function WireEdge({
                   pointerEvents: 'none',
                 }}
               >
-                {sensorNode?.label ?? 'Sensor'} has {sensorTicks} active port{sensorTicks !== 1 ? 's' : ''},{' '}
-                {boardNode?.label ?? 'board'} has {boardTicks} assigned pin{boardTicks !== 1 ? 's' : ''}. Counts must match.
+                {sensorNode?.label ?? 'Sensor'} uses {sensorTicks} active port{sensorTicks !== 1 ? 's' : ''}.{' '}
+                {boardNode?.label ?? 'Board'} has {boardTotal} assigned slot{boardTotal !== 1 ? 's' : ''} across
+                all connected sensors, and {sensorTotal} sensor port{sensorTotal !== 1 ? 's' : ''} need mapping.
+                {assignment?.missingBoardSlots
+                  ? ` Missing ${assignment.missingBoardSlots} slot${assignment.missingBoardSlots !== 1 ? 's' : ''}.`
+                  : assignment?.extraBoardSlots
+                  ? ` ${assignment.extraBoardSlots} extra slot${assignment.extraBoardSlots !== 1 ? 's' : ''} selected.`
+                  : ''}
               </div>
             )}
           </div>

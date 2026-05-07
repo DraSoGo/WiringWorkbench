@@ -2,6 +2,7 @@ import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ComponentDef } from '../../store/diagram';
 import { useDiagramStore } from '../../store/diagram';
+import { getPortCount } from '../../lib/portMapping';
 
 export type ComponentNodeData = {
   def: ComponentDef;
@@ -12,7 +13,7 @@ export type ComponentNodeData = {
 
 const PORT_H = 24;
 const HEADER_H = 32;
-const NODE_W = 200;
+const NODE_W = 248;
 
 const ROLE_COLOR: Record<string, string> = {
   digital: '#7a9b7a',
@@ -42,14 +43,155 @@ const handleStyle: React.CSSProperties = {
 
 function ComponentNode({ id, data, selected }: NodeProps) {
   const { def, label, connectArmed, onStartConnect } = data as ComponentNodeData;
-  const activePorts = useDiagramStore(
-    (s) => s.nodes.find((n) => n.instanceId === id)?.activePorts ?? []
+  const node = useDiagramStore(
+    (s) => s.nodes.find((n) => n.instanceId === id)
   );
   const togglePort = useDiagramStore((s) => s.togglePort);
+  const setPortCount = useDiagramStore((s) => s.setPortCount);
   const [hovered, setHovered] = useState(false);
 
   const ports = def.ports;
-  const nodeH = HEADER_H + ports.length * PORT_H + 8;
+  const isBoard = def.type === 'board';
+  const columns = isBoard ? 2 : 1;
+  const nodeH = HEADER_H + Math.ceil(ports.length / columns) * PORT_H + 8;
+
+  const renderPort = (port: ComponentDef['ports'][number]) => {
+    const count = node ? getPortCount(node, port.id) : 0;
+    const active = count > 0;
+
+    return (
+      <div
+        key={port.id}
+        style={{
+          height: PORT_H,
+          display: 'flex',
+          alignItems: 'center',
+          padding: isBoard ? '0 6px' : '0 8px',
+          gap: 5,
+          minWidth: 0,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={active}
+          onChange={() => togglePort(id, port.id)}
+          onClick={(e) => e.stopPropagation()}
+          className="nodrag"
+          style={{
+            accentColor: 'var(--phosphor)',
+            cursor: 'pointer',
+            width: 11,
+            height: 11,
+            flexShrink: 0,
+            margin: 0,
+          }}
+        />
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: ROLE_COLOR[port.role] ?? '#888',
+            flexShrink: 0,
+            display: 'inline-block',
+            opacity: active ? 1 : 0.35,
+          }}
+        />
+        <span
+          style={{
+            ...mono,
+            fontSize: 9,
+            color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={port.label}
+        >
+          {port.label}
+        </span>
+        {isBoard && active && (
+          <div
+            className="nodrag"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setPortCount(id, port.id, count - 1);
+              }}
+              style={{
+                width: 14,
+                height: 14,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-panel)',
+                color: 'var(--text-secondary)',
+                fontSize: 10,
+                lineHeight: 1,
+                cursor: 'pointer',
+                padding: 0,
+              }}
+              title={`Remove one mapping from ${port.id}`}
+            >
+              -
+            </button>
+            <span
+              style={{
+                ...mono,
+                fontSize: 8,
+                color: 'var(--phosphor)',
+                minWidth: 10,
+                textAlign: 'center',
+              }}
+              title={`${count} mapped sensor port${count !== 1 ? 's' : ''}`}
+            >
+              {count}
+            </span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setPortCount(id, port.id, count + 1);
+              }}
+              style={{
+                width: 14,
+                height: 14,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-panel)',
+                color: 'var(--text-secondary)',
+                fontSize: 10,
+                lineHeight: 1,
+                cursor: 'pointer',
+                padding: 0,
+              }}
+              title={`Add one mapping to ${port.id}`}
+            >
+              +
+            </button>
+          </div>
+        )}
+        {!isBoard && (
+          <span
+            style={{
+              ...mono,
+              fontSize: 8,
+              color: 'var(--text-muted)',
+              flexShrink: 0,
+              opacity: 0.6,
+            }}
+          >
+            {port.id}
+          </span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -138,75 +280,17 @@ function ComponentNode({ id, data, selected }: NodeProps) {
       </div>
 
       {/* port rows */}
-      <div style={{ padding: '4px 0', position: 'relative', zIndex: 2 }}>
-        {ports.map((port) => {
-          const active = activePorts.includes(port.id);
-          return (
-            <div
-              key={port.id}
-              style={{
-                height: PORT_H,
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0 8px',
-                gap: 5,
-                pointerEvents: 'none',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={active}
-                onChange={() => togglePort(id, port.id)}
-                onClick={(e) => e.stopPropagation()}
-                className="nodrag"
-                style={{
-                  accentColor: 'var(--phosphor)',
-                  cursor: 'pointer',
-                  width: 11,
-                  height: 11,
-                  flexShrink: 0,
-                  margin: 0,
-                  pointerEvents: 'all',
-                }}
-              />
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: ROLE_COLOR[port.role] ?? '#888',
-                  flexShrink: 0,
-                  display: 'inline-block',
-                  opacity: active ? 1 : 0.35,
-                }}
-              />
-              <span
-                style={{
-                  ...mono,
-                  fontSize: 9,
-                  color: active ? 'var(--text-primary)' : 'var(--text-muted)',
-                  flex: 1,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {port.label}
-              </span>
-              <span
-                style={{
-                  ...mono,
-                  fontSize: 8,
-                  color: 'var(--text-muted)',
-                  flexShrink: 0,
-                  opacity: 0.6,
-                }}
-                >
-                  {port.id}
-                </span>
-            </div>
-          );
-        })}
+      <div
+        style={{
+          padding: '4px 0',
+          position: 'relative',
+          zIndex: 2,
+          display: 'grid',
+          gridTemplateColumns: isBoard ? 'repeat(2, minmax(0, 1fr))' : '1fr',
+          columnGap: isBoard ? 6 : 0,
+        }}
+      >
+        {ports.map(renderPort)}
       </div>
     </div>
   );
