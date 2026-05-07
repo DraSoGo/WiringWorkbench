@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg-base:       #0d0f0e;
+  --bg-surface:    #141716;
+  --bg-panel:      #1a1d1b;
+  --bg-hover:      #222623;
+  --border:        #2a2e2b;
+  --border-accent: #3a3f3c;
+  --phosphor:      #00e676;
+  --phosphor-dim:  #00b85a;
+  --phosphor-mute: #1a3d2a;
+  --amber:         #ffab00;
+  --amber-dim:     #cc8800;
+  --text-primary:  #d4e8d0;
+  --text-secondary:#7a9b7a;
+  --text-muted:    #4a6b4a;
+  --red:           #ff4757;
+  --blue:          #00b4d8;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* react-flow overrides */
+.react-flow__background { background: var(--bg-base); }
+.react-flow__controls { background: var(--bg-panel) !important; border: 1px solid var(--border) !important; border-radius: 0 !important; }
+.react-flow__controls-button { background: var(--bg-panel) !important; border-bottom: 1px solid var(--border) !important; color: var(--text-primary) !important; fill: var(--text-primary) !important; }
+.react-flow__controls-button:hover { background: var(--bg-hover) !important; }
+.react-flow__minimap { background: var(--bg-panel) !important; border: 1px solid var(--border) !important; border-radius: 0 !important; }
+.react-flow__edge-path { stroke: var(--phosphor) !important; }
+.react-flow__handle { background: var(--phosphor-mute) !important; border: 1px solid var(--phosphor-dim) !important; width: 8px !important; height: 8px !important; border-radius: 0 !important; }
+.react-flow__handle:hover { background: var(--phosphor) !important; }
