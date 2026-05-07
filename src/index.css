@@ -39,6 +39,18 @@ html, body, #root {
 .react-flow__controls-button { background: var(--bg-panel) !important; border-bottom: 1px solid var(--border) !important; color: var(--text-primary) !important; fill: var(--text-primary) !important; }
 .react-flow__controls-button:hover { background: var(--bg-hover) !important; }
 .react-flow__minimap { background: var(--bg-panel) !important; border: 1px solid var(--border) !important; border-radius: 0 !important; }
-.react-flow__edge-path { stroke: var(--phosphor) !important; }
-.react-flow__handle { background: var(--phosphor-mute) !important; border: 1px solid var(--phosphor-dim) !important; width: 8px !important; height: 8px !important; border-radius: 0 !important; }
-.react-flow__handle:hover { background: var(--phosphor) !important; }
+/* edges */
+.react-flow__edge-path { stroke: #6b7280; stroke-width: 2; fill: none; }
+.react-flow__edge.selected .react-flow__edge-path { stroke: var(--blue); }
+.react-flow__edge:hover .react-flow__edge-path { stroke: #9ca3af; }
+.react-flow__edge-interaction { stroke: transparent; stroke-width: 14; }
+
+/* edge labels */
+.react-flow__edge-text { font-family: 'IBM Plex Mono', monospace; font-size: 10px; fill: var(--text-secondary); }
+.react-flow__edge-textbg { fill: var(--bg-surface); fill-opacity: 0.9; }
+
+/* handles */
+.react-flow__handle { background: var(--bg-hover) !important; border: 1px solid var(--border-accent) !important; width: 8px !important; height: 8px !important; border-radius: 0 !important; }
+.react-flow__handle:hover { background: var(--phosphor-dim) !important; border-color: var(--phosphor) !important; }
+.react-flow__handle.connectingfrom,
+.react-flow__handle.valid { background: var(--phosphor) !important; border-color: var(--phosphor) !important; }

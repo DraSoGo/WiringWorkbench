@@ -69,6 +69,7 @@ interface DiagramState {
   // edge actions
   addEdge: (edge: DiagramEdge) => void;
   removeEdge: (edgeId: string) => void;
+  updateEdgeLabel: (edgeId: string, label: string | undefined) => void;
 
   // selection
   selectNode: (instanceId: string | null) => void;
@@ -145,6 +146,10 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
     history: [...s.history, snapshot(s)],
     future: [],
     edges: s.edges.filter((e) => e.id !== edgeId),
+  })),
+
+  updateEdgeLabel: (edgeId, label) => set((s) => ({
+    edges: s.edges.map((e) => (e.id === edgeId ? { ...e, label } : e)),
   })),
 
   selectNode: (instanceId) => set({ selectedId: instanceId }),
