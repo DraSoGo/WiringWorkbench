@@ -1,10 +1,213 @@
-// Export engine — input: DiagramState, output: JSON or Arduino stub
-// Implementation in Phase 4
+import type { ComponentDef, DiagramEdge, DiagramNode, PortDef } from '../store/diagram';
+import { BOARDS } from '../data/boards';
+import { SENSORS } from '../data/sensors';
 
-export function exportJson(): string {
-  return '{}';
+const ALL_DEFS: ComponentDef[] = [...BOARDS, ...SENSORS];
+
+export type ExportState = {
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  customDefs: ComponentDef[];
+};
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function sanitize(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-export function exportArduinoStub(): string {
-  return '// pin assignments\nvoid setup() {}\nvoid loop() {}';
+/** D3→3, GPIO21→21, GP4→4, A0→A0, SDA→SDA, etc. */
+function pinValue(portId: string): string {
+  if (/^D(\d+)$/.test(portId)) return portId.slice(1);
+  if (/^GPIO(\d+)$/i.test(portId)) return portId.replace(/^GPIO/i, '');
+  if (/^GP(\d+)$/.test(portId)) return portId.slice(2);
+  return portId;
+}
+
+function allDefs(customDefs: ComponentDef[]): ComponentDef[] {
+  return [...ALL_DEFS, ...customDefs];
+}
+
+function effectivePorts(node: DiagramNode, defs: ComponentDef[]): PortDef[] {
+  if (node.portsOverride) return node.portsOverride;
+  return defs.find((d) => d.id === node.defId)?.ports ?? [];
+}
+
+/** Builds a per-instance unique key: "DHT11" if only one, "DHT11_1"/"DHT11_2" if multiple. */
+function buildKeyMap(nodes: DiagramNode[]): Map<string, string> {
+  const labelCount = new Map<string, number>();
+  for (const n of nodes) labelCount.set(n.label, (labelCount.get(n.label) ?? 0) + 1);
+
+  const labelIdx = new Map<string, number>();
+  const keyMap = new Map<string, string>();
+  for (const n of nodes) {
+    const idx = (labelIdx.get(n.label) ?? 0) + 1;
+    labelIdx.set(n.label, idx);
+    const name = sanitize(n.label);
+    keyMap.set(n.instanceId, labelCount.get(n.label)! > 1 ? `${name}_${idx}` : name);
+  }
+  return keyMap;
+}
+
+// ─── base64 (unicode-safe) ────────────────────────────────────────────────────
+
+function toB64(str: string): string {
+  return btoa(
+    encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    )
+  );
+}
+
+function fromB64(b64: string): string {
+  return decodeURIComponent(
+    atob(b64)
+      .split('')
+      .map((c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('')
+  );
+}
+
+// ─── exports ──────────────────────────────────────────────────────────────────
+
+/**
+ * JSON pin map: { "DHT11.DATA": "ARDUINO_UNO.D3", ... }
+ * Keys are "NodeKey.portId" for both sides.
+ */
+export function exportJSON(state: ExportState): string {
+  const keyMap = buildKeyMap(state.nodes);
+  const result: Record<string, string> = {};
+
+  for (const edge of state.edges) {
+    const fromKey = keyMap.get(edge.fromNode);
+    const toKey = keyMap.get(edge.toNode);
+    if (!fromKey || !toKey) continue;
+    result[`${fromKey}.${edge.fromPort}`] = `${toKey}.${edge.toPort}`;
+  }
+
+  return JSON.stringify(result, null, 2);
+}
+
+/**
+ * Arduino .ino stub with #define pin assignments.
+ * Only generates defines for sensor↔board signal connections (skips power/gnd).
+ */
+export function exportArduinoStub(state: ExportState): string {
+  const defs = allDefs(state.customDefs);
+  const keyMap = buildKeyMap(state.nodes);
+  const date = new Date().toISOString().slice(0, 10);
+
+  const boards = state.nodes.filter((n) => defs.find((d) => d.id === n.defId)?.type === 'board');
+  const sensors = state.nodes.filter((n) => {
+    const type = defs.find((d) => d.id === n.defId)?.type;
+    return type === 'sensor' || type === 'custom';
+  });
+
+  const lines: string[] = [];
+
+  // header comment
+  lines.push('/*');
+  lines.push(' * EasyArduino — generated pin mapping');
+  lines.push(` * Date: ${date}`);
+  if (boards.length) lines.push(` * Board(s): ${boards.map((n) => n.label).join(', ')}`);
+  if (sensors.length) lines.push(` * Components: ${sensors.map((n) => n.label).join(', ')}`);
+  lines.push(' */');
+  lines.push('');
+
+  // #defines
+  const defineLines: string[] = [];
+
+  for (const edge of state.edges) {
+    const fromNode = state.nodes.find((n) => n.instanceId === edge.fromNode);
+    const toNode = state.nodes.find((n) => n.instanceId === edge.toNode);
+    if (!fromNode || !toNode) continue;
+
+    const fromDef = defs.find((d) => d.id === fromNode.defId);
+    const toDef = defs.find((d) => d.id === toNode.defId);
+    const fromIsBoard = fromDef?.type === 'board';
+    const toIsBoard = toDef?.type === 'board';
+
+    // only sensor↔board edges
+    if (fromIsBoard === toIsBoard) continue;
+
+    const sensorNode = fromIsBoard ? toNode : fromNode;
+    const sensorPortId = fromIsBoard ? edge.toPort : edge.fromPort;
+    const boardPortId = fromIsBoard ? edge.fromPort : edge.toPort;
+
+    // skip power/gnd ports
+    const sensorPorts = effectivePorts(sensorNode, defs);
+    const sensorPort = sensorPorts.find((p) => p.id === sensorPortId);
+    if (sensorPort?.role === 'power' || sensorPort?.role === 'gnd') continue;
+
+    const nodeKey = keyMap.get(sensorNode.instanceId) ?? sanitize(sensorNode.label);
+    const defineName = `${nodeKey}_${sanitize(sensorPortId)}`;
+    const pin = pinValue(boardPortId);
+
+    defineLines.push(`#define ${defineName.padEnd(28)} ${pin}`);
+  }
+
+  if (defineLines.length) {
+    defineLines.forEach((l) => lines.push(l));
+  } else {
+    lines.push('// No connections found — drop components on the canvas and wire them up');
+  }
+
+  lines.push('');
+  lines.push('void setup() {');
+  lines.push('  // TODO: configure pins');
+  lines.push('}');
+  lines.push('');
+  lines.push('void loop() {');
+  lines.push('  // TODO: your code here');
+  lines.push('}');
+
+  return lines.join('\n');
+}
+
+/**
+ * Encodes the diagram as base64 JSON appended to current URL as ?d=<b64>.
+ */
+export function exportShareURL(state: ExportState): string {
+  const payload = {
+    nodes: state.nodes,
+    edges: state.edges,
+    customDefs: state.customDefs,
+  };
+  const b64 = toB64(JSON.stringify(payload));
+  const url = new URL(window.location.href);
+  url.searchParams.set('d', b64);
+  return url.toString();
+}
+
+/**
+ * Parses ?d= query param. Returns null if absent or invalid.
+ */
+export function parseShareURL(search: string): ExportState | null {
+  const d = new URLSearchParams(search).get('d');
+  if (!d) return null;
+  try {
+    const parsed = JSON.parse(fromB64(d));
+    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
+    return {
+      nodes: parsed.nodes as DiagramNode[],
+      edges: parsed.edges as DiagramEdge[],
+      customDefs: Array.isArray(parsed.customDefs) ? (parsed.customDefs as ComponentDef[]) : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── download helper (browser only) ──────────────────────────────────────────
+
+export function downloadFile(filename: string, content: string, mime: string): void {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

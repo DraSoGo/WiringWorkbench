@@ -60,6 +60,7 @@ interface DiagramState {
   selectedId: string | null;
   history: DiagramSnapshot[];
   future: DiagramSnapshot[];
+  _loadGen: number; // incremented by loadDiagram; Canvas watches for full rf reset
 
   // node actions
   addNode: (node: DiagramNode) => void;
@@ -84,6 +85,9 @@ interface DiagramState {
   updateCustomDef: (def: ComponentDef) => void;
   removeCustomDef: (defId: string) => void;
 
+  // load (e.g. from share URL)
+  loadDiagram: (snapshot: { nodes: DiagramNode[]; edges: DiagramEdge[]; customDefs: ComponentDef[] }) => void;
+
   // history
   undo: () => void;
   redo: () => void;
@@ -103,6 +107,7 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   selectedId: null,
   history: [],
   future: [],
+  _loadGen: 0,
 
   addNode: (node) => set((s) => ({
     history: [...s.history, snapshot(s)],
@@ -176,6 +181,16 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
 
   removeCustomDef: (defId) => set((s) => ({
     customDefs: s.customDefs.filter((d) => d.id !== defId),
+  })),
+
+  loadDiagram: (snapshot) => set((s) => ({
+    nodes: snapshot.nodes,
+    edges: snapshot.edges,
+    customDefs: snapshot.customDefs,
+    selectedId: null,
+    history: [],
+    future: [],
+    _loadGen: s._loadGen + 1,
   })),
 
   undo: () => {

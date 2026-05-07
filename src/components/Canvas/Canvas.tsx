@@ -134,6 +134,24 @@ function CanvasInner() {
     toastTimer.current = setTimeout(() => setToast(null), 2500);
   }, []);
 
+  // ── full reset on loadDiagram (share URL, future open-file) ─────────────────
+
+  useEffect(() => {
+    if (store._loadGen === 0) return; // skip initial mount
+    const newNodes = store.nodes.map((n) => buildRfNode(n, new Set(), store.customDefs));
+    const newEdges = store.edges.map((e) => ({
+      id: e.id,
+      source: e.fromNode,
+      sourceHandle: e.fromPort,
+      target: e.toNode,
+      targetHandle: e.toPort,
+      label: e.label ?? '',
+    }));
+    setRfNodes(newNodes);
+    setRfEdges(newEdges);
+    knownIds.current = new Set(store.nodes.map((n) => n.instanceId));
+  }, [store._loadGen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── sync store → rf (undo/redo, external adds/removes) ────────────────────
 
   useEffect(() => {
