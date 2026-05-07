@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useDiagramStore } from '../../store/diagram';
 import {
   downloadFile,
+  exportArduinoPromptMarkdown,
   exportArduinoStub,
   exportJSON,
   exportShareURL,
@@ -111,12 +112,11 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
   };
 
   const handleExportPrompt = () => {
-    const link = document.createElement('a');
-    link.href = '/downloads.md';
-    link.download = 'downloads.md';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadFile(
+      'arduino-code-prompt.md',
+      exportArduinoPromptMarkdown(exportState),
+      'text/markdown;charset=utf-8'
+    );
   };
 
   const handleShare = async () => {
@@ -166,7 +166,7 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
         {/* export */}
         <Btn label="JSON" title="Download pin map as JSON" onClick={handleExportJSON} accent />
         <Btn label=".INO" title="Download Arduino sketch stub" onClick={handleExportArduino} accent />
-        <Btn label=".MD" title="Download AI prompt markdown file" onClick={handleExportPrompt} accent />
+        <Btn label=".MD" title="Download AI prompt for Arduino IDE code generation" onClick={handleExportPrompt} accent />
 
         <Sep />
 

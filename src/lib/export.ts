@@ -29,6 +29,15 @@ function allDefs(customDefs: ComponentDef[]): ComponentDef[] {
   return [...ALL_DEFS, ...customDefs];
 }
 
+type PromptMapping = {
+  sensorLabel: string;
+  sensorKey: string;
+  sensorPortId: string;
+  boardLabel: string;
+  boardPortId: string | null;
+  boardPinValue: string | null;
+};
+
 /** Builds a per-instance unique key: "DHT11" if only one, "DHT11_1"/"DHT11_2" if multiple. */
 function buildKeyMap(nodes: DiagramNode[]): Map<string, string> {
   const labelCount = new Map<string, number>();
@@ -152,6 +161,115 @@ export function exportArduinoStub(state: ExportState): string {
   lines.push('void loop() {');
   lines.push('  // TODO: your code here');
   lines.push('}');
+
+  return lines.join('\n');
+}
+
+export function exportArduinoPromptMarkdown(state: ExportState): string {
+  const defs = allDefs(state.customDefs);
+  const keyMap = buildKeyMap(state.nodes);
+  const date = new Date().toISOString().slice(0, 10);
+
+  const boards = state.nodes.filter((node) => defs.find((def) => def.id === node.defId)?.type === 'board');
+  const components = state.nodes.filter((node) => {
+    const type = defs.find((def) => def.id === node.defId)?.type;
+    return type === 'sensor' || type === 'custom';
+  });
+
+  const mappings: PromptMapping[] = [];
+
+  for (const edge of state.edges) {
+    const assignment = analyzeEdgeAssignment(edge.id, state.nodes, state.edges, defs);
+    if (!assignment) continue;
+
+    const sensorKey = keyMap.get(assignment.sensorNode.instanceId) ?? sanitize(assignment.sensorNode.label);
+    assignment.sensorPorts.forEach((sensorPort, index) => {
+      const boardPort = assignment.assignedBoardPorts[index];
+      mappings.push({
+        sensorLabel: assignment.sensorNode.label,
+        sensorKey,
+        sensorPortId: sensorPort.id,
+        boardLabel: assignment.boardNode.label,
+        boardPortId: boardPort?.id ?? null,
+        boardPinValue: boardPort ? pinValue(boardPort.id) : null,
+      });
+    });
+  }
+
+  const lines: string[] = [];
+
+  lines.push('# Arduino IDE Code Generation Prompt');
+  lines.push('');
+  lines.push('Write a complete Arduino IDE sketch for the hardware design described below.');
+  lines.push('Return only Arduino C++ code suitable for a single `.ino` file unless extra explanation is absolutely necessary.');
+  lines.push('');
+  lines.push('## Requirements');
+  lines.push('');
+  lines.push('- Generate code for Arduino IDE.');
+  lines.push('- Use the exact board and pin mapping listed below.');
+  lines.push('- Include required `#include` statements if libraries are needed.');
+  lines.push('- Define pins with clear constant names.');
+  lines.push('- Implement `setup()` and `loop()` fully.');
+  lines.push('- Add short comments only where they help explain non-obvious logic.');
+  lines.push('- If any mapping is missing, keep the code compilable and mark the missing part with a `TODO` comment.');
+  lines.push('- Do not invent extra hardware that is not listed.');
+  lines.push('');
+  lines.push('## Project Summary');
+  lines.push('');
+  lines.push(`- Export date: ${date}`);
+  lines.push(`- Board count: ${boards.length}`);
+  lines.push(`- Component count: ${components.length}`);
+  lines.push(`- Connection count: ${state.edges.length}`);
+  lines.push('');
+  lines.push('## Boards');
+  lines.push('');
+  if (boards.length) {
+    boards.forEach((board) => {
+      const def = defs.find((item) => item.id === board.defId);
+      lines.push(`- ${board.label}${def?.category ? ` (${def.category})` : ''}${def?.notes ? ` — ${def.notes}` : ''}`);
+    });
+  } else {
+    lines.push('- No board selected.');
+  }
+  lines.push('');
+  lines.push('## Components');
+  lines.push('');
+  if (components.length) {
+    components.forEach((component) => {
+      const def = defs.find((item) => item.id === component.defId);
+      const componentKey = keyMap.get(component.instanceId) ?? sanitize(component.label);
+      lines.push(`- ${component.label} [${componentKey}]${def?.category ? ` (${def.category})` : ''}${def?.notes ? ` — ${def.notes}` : ''}`);
+    });
+  } else {
+    lines.push('- No components selected.');
+  }
+  lines.push('');
+  lines.push('## Pin Mapping');
+  lines.push('');
+  if (mappings.length) {
+    mappings.forEach((mapping) => {
+      if (mapping.boardPortId && mapping.boardPinValue) {
+        lines.push(`- ${mapping.sensorLabel}.${mapping.sensorPortId} -> ${mapping.boardLabel}.${mapping.boardPortId} (Arduino pin value: ${mapping.boardPinValue})`);
+      } else {
+        lines.push(`- ${mapping.sensorLabel}.${mapping.sensorPortId} -> UNASSIGNED`);
+      }
+    });
+  } else {
+    lines.push('- No mapped signal connections found.');
+  }
+  lines.push('');
+  lines.push('## Expected Output');
+  lines.push('');
+  lines.push('Produce a complete Arduino sketch that:');
+  lines.push('');
+  lines.push('- initializes the listed components correctly');
+  lines.push('- uses the mapped pins exactly');
+  lines.push('- reads sensors and/or drives outputs in a reasonable main loop');
+  lines.push('- keeps the code simple, correct, and ready to paste into Arduino IDE');
+  lines.push('');
+  lines.push('## Final Instruction');
+  lines.push('');
+  lines.push('Generate the final Arduino IDE code now.');
 
   return lines.join('\n');
 }
