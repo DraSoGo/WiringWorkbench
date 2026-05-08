@@ -7,6 +7,13 @@ import Library from './components/Library/Library';
 import Canvas from './components/Canvas/Canvas';
 import Inspector from './components/Inspector/Inspector';
 
+declare global {
+  interface Window {
+    dataLayer?: unknown[];
+    gtag?: (...args: unknown[]) => void;
+  }
+}
+
 const mono = { fontFamily: 'IBM Plex Mono, monospace' } as const;
 
 type RoutePath = '/' | '/features' | '/how-it-works' | '/faq' | '/project';
@@ -135,6 +142,15 @@ function ensureCanonical(href: string) {
     document.head.appendChild(link);
   }
   link.href = href;
+}
+
+function trackPageView(title: string) {
+  if (typeof window.gtag !== 'function') return;
+  window.gtag('event', 'page_view', {
+    page_title: title,
+    page_path: `${window.location.pathname}${window.location.search}`,
+    page_location: window.location.href,
+  });
 }
 
 function PublicLink({
@@ -844,6 +860,10 @@ export default function App() {
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, [route]);
+
+  useEffect(() => {
+    trackPageView(routeMeta[route].title);
   }, [route]);
 
   const publicPage = useMemo(() => {
