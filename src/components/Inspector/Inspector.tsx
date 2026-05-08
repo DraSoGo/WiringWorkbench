@@ -8,7 +8,6 @@ import {
 import { BOARDS } from '../../data/boards';
 import { SENSORS } from '../../data/sensors';
 import {
-  analyzeBoardAssignments,
   analyzeEdgeAssignment,
   formatPortMapping,
   getEffectivePorts,
@@ -284,10 +283,6 @@ function ConnectionsSection({
   const myNode = nodes.find((n) => n.instanceId === nodeId);
   const myTicks = myNode ? getTotalAssignedPorts(myNode) : 0;
   const myType = myNode ? defs.find((def) => def.id === myNode.defId)?.type : undefined;
-  const boardSummary = myType === 'board'
-    ? analyzeBoardAssignments(nodeId, nodes, edges, defs)
-    : null;
-
   const connectedEdges = edges.filter(
     (e) => e.fromNode === nodeId || e.toNode === nodeId
   );
@@ -316,10 +311,10 @@ function ConnectionsSection({
 
         const otherType = defs.find((def) => def.id === other.defId)?.type;
         const otherTicks = otherType === 'board'
-          ? assignment.boardPortSlots.length
+          ? assignment.assignedBoardPorts.length
           : assignment.sensorPorts.length;
-        const bothZero = assignment.sensorPorts.length === 0 && assignment.boardPortSlots.length === 0;
-        const mismatch = !bothZero && assignment.aggregateMismatch;
+        const bothZero = assignment.sensorPorts.length === 0 && assignment.assignedBoardPorts.length === 0;
+        const mismatch = !bothZero && assignment.edgeMismatch;
         const otherTickLabel = otherType === 'board' ? 'assigned slot' : 'active port';
         const myLabel = myType === 'board' ? 'assigned' : 'active';
         const mapping = formatPortMapping(assignment);
@@ -349,11 +344,11 @@ function ConnectionsSection({
             </div>
             {mismatch && (
               <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 3, lineHeight: 1.4 }}>
-                {myType === 'board'
-                  ? `Connected set uses ${boardSummary?.totalSensorPorts ?? 0} sensor ports, but this board has ${boardSummary?.boardPortSlots.length ?? 0} assigned slots.`
-                  : assignment.missingBoardSlots
-                  ? `Connected to ${other.label}: you have ${myTicks} ${myLabel}, but the board is short by ${assignment.missingBoardSlots} slot${assignment.missingBoardSlots !== 1 ? 's' : ''}.`
-                  : `Connected to ${other.label}: the board has ${assignment.extraBoardSlots} extra assigned slot${assignment.extraBoardSlots !== 1 ? 's' : ''}. Reduce the board count or activate more sensor ports.`}
+                {assignment.edgeMissingBoardSlots
+                  ? myType === 'board'
+                    ? `${other.label} needs ${assignment.sensorPorts.length} active port${assignment.sensorPorts.length !== 1 ? 's' : ''}, but this connection only has ${assignment.assignedBoardPorts.length} assigned slot${assignment.assignedBoardPorts.length !== 1 ? 's' : ''}.`
+                    : `Connected to ${other.label}: you have ${myTicks} ${myLabel}, but this connection only has ${assignment.assignedBoardPorts.length} assigned slot${assignment.assignedBoardPorts.length !== 1 ? 's' : ''}.`
+                  : `${mapping} contains ${assignment.edgeIncompatibleSlots} invalid mapping${assignment.edgeIncompatibleSlots !== 1 ? 's' : ''}.`}
               </div>
             )}
           </div>

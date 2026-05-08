@@ -11,6 +11,14 @@ export type ExportState = {
   customDefs: ComponentDef[];
 };
 
+export type ProjectFile = {
+  app: 'wiringworkbench';
+  version: 1;
+  name: string;
+  savedAt: string;
+  diagram: ExportState;
+};
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function sanitize(s: string): string {
@@ -27,6 +35,26 @@ function pinValue(portId: string): string {
 
 function allDefs(customDefs: ComponentDef[]): ComponentDef[] {
   return [...ALL_DEFS, ...customDefs];
+}
+
+function parseExportState(raw: unknown): ExportState | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const candidate = raw as {
+    nodes?: unknown;
+    edges?: unknown;
+    customDefs?: unknown;
+  };
+
+  if (!Array.isArray(candidate.nodes) || !Array.isArray(candidate.edges)) return null;
+
+  return {
+    nodes: candidate.nodes as DiagramNode[],
+    edges: candidate.edges as DiagramEdge[],
+    customDefs: Array.isArray(candidate.customDefs)
+      ? (candidate.customDefs as ComponentDef[])
+      : [],
+  };
 }
 
 type PromptMapping = {
@@ -274,6 +302,67 @@ export function exportArduinoPromptMarkdown(state: ExportState): string {
   return lines.join('\n');
 }
 
+export function buildProjectFileName(projectName = 'wiringworkbench-project'): string {
+  const base = projectName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'wiringworkbench-project';
+
+  return `${base}.wiringworkbench.json`;
+}
+
+export function exportProjectFile(
+  state: ExportState,
+  projectName = 'WiringWorkbench Project'
+): string {
+  const file: ProjectFile = {
+    app: 'wiringworkbench',
+    version: 1,
+    name: projectName,
+    savedAt: new Date().toISOString(),
+    diagram: state,
+  };
+
+  return JSON.stringify(file, null, 2);
+}
+
+export function parseProjectFileContent(content: string): {
+  name: string;
+  savedAt?: string;
+  state: ExportState;
+} | null {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+
+    if (parsed && typeof parsed === 'object' && 'diagram' in parsed) {
+      const project = parsed as {
+        name?: unknown;
+        savedAt?: unknown;
+        diagram?: unknown;
+      };
+      const state = parseExportState(project.diagram);
+      if (!state) return null;
+      return {
+        name: typeof project.name === 'string' && project.name.trim()
+          ? project.name
+          : 'Imported Project',
+        savedAt: typeof project.savedAt === 'string' ? project.savedAt : undefined,
+        state,
+      };
+    }
+
+    const legacyState = parseExportState(parsed);
+    if (!legacyState) return null;
+    return {
+      name: 'Imported Project',
+      state: legacyState,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Encodes the diagram as base64 JSON appended to current URL as ?d=<b64>.
  */
@@ -296,13 +385,7 @@ export function parseShareURL(search: string): ExportState | null {
   const d = new URLSearchParams(search).get('d');
   if (!d) return null;
   try {
-    const parsed = JSON.parse(fromB64(d));
-    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
-    return {
-      nodes: parsed.nodes as DiagramNode[],
-      edges: parsed.edges as DiagramEdge[],
-      customDefs: Array.isArray(parsed.customDefs) ? (parsed.customDefs as ComponentDef[]) : [],
-    };
+    return parseExportState(JSON.parse(fromB64(d)));
   } catch {
     return null;
   }

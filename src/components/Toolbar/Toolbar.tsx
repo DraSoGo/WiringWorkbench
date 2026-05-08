@@ -1,11 +1,14 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDiagramStore } from '../../store/diagram';
 import {
+  buildProjectFileName,
   downloadFile,
   exportArduinoPromptMarkdown,
+  exportProjectFile,
   exportArduinoStub,
   exportJSON,
   exportShareURL,
+  parseProjectFileContent,
 } from '../../lib/export';
 import { saveDiagram } from '../../lib/storage';
 
@@ -76,6 +79,7 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
   const { undo, redo, history, future } = store;
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const openFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -83,11 +87,11 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
     toastTimer.current = setTimeout(() => setToast(null), 2200);
   };
 
-  const exportState = {
+  const exportState = useMemo(() => ({
     nodes: store.nodes,
     edges: store.edges,
     customDefs: store.customDefs,
-  };
+  }), [store.customDefs, store.edges, store.nodes]);
 
   const handleNew = () => {
     if (
@@ -101,6 +105,38 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
   const handleSave = () => {
     saveDiagram(exportState);
     showToast('Saved!');
+  };
+
+  const handleSaveProject = useCallback(() => {
+    const filename = buildProjectFileName(store.nodes[0]?.label || 'wiringworkbench-project');
+    downloadFile(
+      filename,
+      exportProjectFile(exportState),
+      'application/json;charset=utf-8'
+    );
+    showToast('Project file downloaded');
+  }, [exportState, store.nodes]);
+
+  const handleOpenProject = useCallback(() => {
+    openFileInputRef.current?.click();
+  }, []);
+
+  const handleProjectFileSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const parsed = parseProjectFileContent(await file.text());
+    if (!parsed) {
+      showToast('Invalid project file');
+      return;
+    }
+
+    store.loadDiagram(parsed.state);
+    saveDiagram(parsed.state);
+    showToast(`Opened ${parsed.name}`);
   };
 
   const handleExportJSON = () => {
@@ -130,8 +166,36 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
     }
   };
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveProject();
+      }
+      if (ctrl && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        handleOpenProject();
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleOpenProject, handleSaveProject]);
+
   return (
     <>
+      <input
+        ref={openFileInputRef}
+        type="file"
+        accept=".wiringworkbench.json,.json,application/json"
+        onChange={handleProjectFileSelected}
+        style={{ display: 'none' }}
+      />
+
       <header
         style={{
           height: 44,
@@ -153,7 +217,9 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
 
         {/* diagram ops */}
         <Btn label="NEW" title="New diagram" onClick={handleNew} />
-        <Btn label="SAVE" title="Save to browser (Ctrl+S)" onClick={handleSave} accent />
+        <Btn label="OPEN" title="Open project file (Ctrl+O)" onClick={handleOpenProject} />
+        <Btn label="SAVE" title="Save project file (Ctrl+S)" onClick={handleSaveProject} accent />
+        <Btn label="LOCAL" title="Save to browser storage" onClick={handleSave} />
 
         <Sep />
 

@@ -36,6 +36,47 @@ export function getExpandedSelectedPorts(node: DiagramNode, defs: ComponentDef[]
   return expanded;
 }
 
+function isBoardSignalRole(role: PortDef['role']): boolean {
+  return role === 'digital' || role === 'pwm' || role === 'spi' || role === 'uart' || role === 'i2c';
+}
+
+function arePortRolesCompatible(sensorPort: PortDef, boardPort: PortDef): boolean {
+  return getPortCompatibilityScore(sensorPort, boardPort) > 0;
+}
+
+function getPortCompatibilityScore(sensorPort: PortDef, boardPort: PortDef): number {
+  switch (sensorPort.role) {
+    case 'power':
+      return boardPort.role === 'power' ? 100 : -1;
+    case 'gnd':
+      return boardPort.role === 'gnd' ? 100 : -1;
+    case 'analog':
+      return boardPort.role === 'analog' ? 100 : -1;
+    case 'i2c':
+      return boardPort.role === 'i2c' ? 100 : -1;
+    case 'spi':
+      return boardPort.role === 'spi' ? 100 : -1;
+    case 'uart':
+      return boardPort.role === 'uart' ? 100 : -1;
+    case 'pwm':
+      if (boardPort.role === 'pwm') return 100;
+      if (boardPort.role === 'digital') return 90;
+      if (boardPort.role === 'spi' || boardPort.role === 'uart' || boardPort.role === 'i2c') return 75;
+      return -1;
+    case 'digital':
+      if (boardPort.role === 'digital') return 100;
+      if (boardPort.role === 'pwm') return 95;
+      if (boardPort.role === 'spi' || boardPort.role === 'uart' || boardPort.role === 'i2c') return 85;
+      return -1;
+    case 'custom':
+      if (boardPort.role === 'custom') return 100;
+      if (isBoardSignalRole(boardPort.role)) return 70;
+      return -1;
+    default:
+      return -1;
+  }
+}
+
 function getNodeType(
   node: DiagramNode | undefined,
   defs: ComponentDef[]
@@ -48,6 +89,11 @@ type BoardSensorPair = {
   edge: DiagramEdge;
   boardNode: DiagramNode;
   sensorNode: DiagramNode;
+};
+
+type BoardSlot = {
+  port: PortDef;
+  slotOrder: number;
 };
 
 function resolveBoardSensorPair(
@@ -74,6 +120,10 @@ export type EdgeAssignment = {
   sensorNode: DiagramNode;
   sensorPorts: PortDef[];
   assignedBoardPorts: PortDef[];
+  connectionOrder: number;
+  edgeMismatch: boolean;
+  edgeMissingBoardSlots: number;
+  edgeIncompatibleSlots: number;
   boardPortSlots: PortDef[];
   totalSensorPorts: number;
   aggregateMismatch: boolean;
@@ -97,21 +147,49 @@ export function analyzeBoardAssignments(
   if (!boardNode || getNodeType(boardNode, defs) !== 'board') return null;
 
   const boardPortSlots = getExpandedSelectedPorts(boardNode, defs);
+  const availableSlots: BoardSlot[] = boardPortSlots.map((port, slotOrder) => ({ port, slotOrder }));
   const relatedPairs = edges
     .map((edge) => resolveBoardSensorPair(edge, nodes, defs))
     .filter((pair): pair is BoardSensorPair => !!pair && pair.boardNode.instanceId === boardId);
 
-  let cursor = 0;
-  const assignments = relatedPairs.map(({ edge, sensorNode }) => {
+  const assignments = relatedPairs.map(({ edge, sensorNode }, index) => {
     const sensorPorts = getSelectedPorts(sensorNode, defs);
-    const assignedBoardPorts = boardPortSlots.slice(cursor, cursor + sensorPorts.length);
-    cursor += sensorPorts.length;
+    const assignedBoardPorts: PortDef[] = [];
+    let edgeMissingBoardSlots = 0;
+    let edgeIncompatibleSlots = 0;
+
+    for (const sensorPort of sensorPorts) {
+      if (!availableSlots.length) {
+        edgeMissingBoardSlots += 1;
+        continue;
+      }
+
+      let chosenIndex = -1;
+      let chosenScore = Number.NEGATIVE_INFINITY;
+
+      for (let slotIndex = 0; slotIndex < availableSlots.length; slotIndex += 1) {
+        const score = getPortCompatibilityScore(sensorPort, availableSlots[slotIndex].port);
+        if (score > chosenScore) {
+          chosenScore = score;
+          chosenIndex = slotIndex;
+        }
+      }
+
+      const [chosenSlot] = availableSlots.splice(chosenIndex, 1);
+      assignedBoardPorts.push(chosenSlot.port);
+      if (chosenScore <= 0) edgeIncompatibleSlots += 1;
+    }
+
     return {
       edge,
       boardNode,
       sensorNode,
       sensorPorts,
       assignedBoardPorts,
+      connectionOrder: index,
+      edgeMismatch: edgeMissingBoardSlots > 0 || edgeIncompatibleSlots > 0,
+      edgeMissingBoardSlots,
+      edgeIncompatibleSlots,
       boardPortSlots,
       totalSensorPorts: 0,
       aggregateMismatch: false,
@@ -162,7 +240,8 @@ export function formatPortMapping(assignment: EdgeAssignment): string {
   return assignment.sensorPorts
     .map((sensorPort, index) => {
       const boardPort = assignment.assignedBoardPorts[index];
-      return `${sensorPort.id} -> ${boardPort?.id ?? 'unassigned'}`;
+      const incompatible = boardPort && !arePortRolesCompatible(sensorPort, boardPort);
+      return `${sensorPort.id} -> ${boardPort?.id ?? 'unassigned'}${incompatible ? ' !' : ''}`;
     })
     .join(', ');
 }

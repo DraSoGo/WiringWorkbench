@@ -8,12 +8,23 @@ import {
 import { useDiagramStore } from '../../store/diagram';
 import { BOARDS } from '../../data/boards';
 import { SENSORS } from '../../data/sensors';
-import { analyzeEdgeAssignment } from '../../lib/portMapping';
+import { analyzeEdgeAssignment, getEffectivePorts } from '../../lib/portMapping';
 
 const mono = { fontFamily: 'IBM Plex Mono, monospace' } as const;
 
+// Tune these to adjust where the warning badge and tooltip sit relative to the sensor.
+const NODE_HEADER_HEIGHT = 32;
+const NODE_PORT_HEIGHT = 24;
+const NODE_PADDING_HEIGHT = 8;
+const WARNING_X_FROM_SENSOR_RIGHT = 12;
+const WARNING_Y_FROM_SENSOR_TOP = 10;
+const WARNING_TOOLTIP_TOP_OFFSET = -22;
+const WARNING_TOOLTIP_SIDE_OFFSET = 14;
+const WARNING_TOOLTIP_WIDTH = 250;
+
 export default function WireEdge({
   id,
+  source,
   sourceX,
   sourceY,
   targetX,
@@ -34,12 +45,11 @@ export default function WireEdge({
   const sensorNode = assignment?.sensorNode;
   const boardNode = assignment?.boardNode;
   const sensorTicks = assignment?.sensorPorts.length ?? 0;
-  const boardTotal = assignment?.boardPortSlots.length ?? 0;
-  const sensorTotal = assignment?.totalSensorPorts ?? 0;
+  const assignedBoardTicks = assignment?.assignedBoardPorts.length ?? 0;
 
-  const bothZero = sensorTicks === 0 && boardTotal === 0;
-  const mismatch = !!assignment && !bothZero && assignment.aggregateMismatch;
-  const matched = !!assignment && !bothZero && !assignment.aggregateMismatch;
+  const bothZero = sensorTicks === 0 && assignedBoardTicks === 0;
+  const mismatch = !!assignment && !bothZero && assignment.edgeMismatch;
+  const matched = !!assignment && !bothZero && !assignment.edgeMismatch;
 
   const edgeColor = bothZero
     ? 'var(--edge-color)'
@@ -52,6 +62,16 @@ export default function WireEdge({
   });
 
   const hasLabel = typeof label === 'string' && label.length > 0;
+  const towardTarget = targetX >= sourceX ? 1 : -1;
+  const sensorIsSource = assignment?.sensorNode.instanceId === source;
+  const sensorAnchorX = sensorIsSource ? sourceX : targetX;
+  const sensorAnchorY = sensorIsSource ? sourceY : targetY;
+  const sensorPortRows = sensorNode ? getEffectivePorts(sensorNode, defs).length : 0;
+  const sensorHeight = NODE_HEADER_HEIGHT + sensorPortRows * NODE_PORT_HEIGHT + NODE_PADDING_HEIGHT;
+  const warningX = sensorAnchorX + WARNING_X_FROM_SENSOR_RIGHT;
+  const warningY = sensorAnchorY - sensorHeight / 2 - WARNING_Y_FROM_SENSOR_TOP;
+  const firstLine = `${sensorNode?.label ?? 'Sensor'} uses ${sensorTicks} active port${sensorTicks !== 1 ? 's' : ''}.`;
+  const secondLine = `${boardNode?.label ?? 'Board'} has ${assignedBoardTicks} assigned slot${assignedBoardTicks !== 1 ? 's' : ''}.${assignment?.edgeMissingBoardSlots ? ` Missing ${assignment.edgeMissingBoardSlots}.` : ''}${assignment?.edgeIncompatibleSlots ? ` Invalid ${assignment.edgeIncompatibleSlots}.` : ''}`;
 
   return (
     <>
@@ -91,8 +111,9 @@ export default function WireEdge({
           <div
             style={{
               position: 'absolute',
-              transform: `translate(-50%,-50%) translate(${labelX}px,${labelY + (hasLabel ? 18 : 0)}px)`,
+              transform: `translate(-50%,-50%) translate(${warningX}px,${warningY}px)`,
               pointerEvents: 'all',
+              zIndex: 5000,
             }}
             className="nodrag nopan"
           >
@@ -121,28 +142,26 @@ export default function WireEdge({
               <div
                 style={{
                   position: 'absolute',
-                  bottom: 22,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
+                  top: WARNING_TOOLTIP_TOP_OFFSET,
+                  ...(towardTarget === 1
+                    ? { left: WARNING_TOOLTIP_SIDE_OFFSET }
+                    : { right: WARNING_TOOLTIP_SIDE_OFFSET }),
                   background: 'var(--bg-panel)',
                   border: '1px solid #f59e0b',
                   color: 'var(--text-primary)',
                   ...mono,
                   fontSize: 10,
                   padding: '6px 10px',
-                  whiteSpace: 'nowrap',
+                  width: WARNING_TOOLTIP_WIDTH,
+                  whiteSpace: 'normal',
+                  lineHeight: 1.35,
                   zIndex: 20,
                   pointerEvents: 'none',
+                  boxShadow: '0 0 0 1px rgba(255,171,0,0.08)',
                 }}
               >
-                {sensorNode?.label ?? 'Sensor'} uses {sensorTicks} active port{sensorTicks !== 1 ? 's' : ''}.{' '}
-                {boardNode?.label ?? 'Board'} has {boardTotal} assigned slot{boardTotal !== 1 ? 's' : ''} across
-                all connected sensors, and {sensorTotal} sensor port{sensorTotal !== 1 ? 's' : ''} need mapping.
-                {assignment?.missingBoardSlots
-                  ? ` Missing ${assignment.missingBoardSlots} slot${assignment.missingBoardSlots !== 1 ? 's' : ''}.`
-                  : assignment?.extraBoardSlots
-                  ? ` ${assignment.extraBoardSlots} extra slot${assignment.extraBoardSlots !== 1 ? 's' : ''} selected.`
-                  : ''}
+                <div>{firstLine}</div>
+                <div>{secondLine}</div>
               </div>
             )}
           </div>
