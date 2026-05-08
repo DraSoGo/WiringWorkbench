@@ -29,6 +29,7 @@ import {
 } from '../../store/diagram';
 import { BOARDS } from '../../data/boards';
 import { SENSORS } from '../../data/sensors';
+import { getEffectivePorts, getTotalAssignedPorts, suggestAutoBoardPortCounts } from '../../lib/portMapping';
 import ComponentNode, { type ComponentNodeData } from './ComponentNode';
 import WireEdge from './WireEdge';
 
@@ -184,6 +185,37 @@ function CanvasInner() {
       fromNode: sourceId,
       toNode: targetId,
     };
+    const boardNode = sourceIsBoard ? sourceNode : targetNode;
+    const sensorNode = sourceIsBoard ? targetNode : sourceNode;
+    const sensorHasSelections = getTotalAssignedPorts(sensorNode) > 0;
+    const seededSensorCounts = sensorHasSelections
+      ? sensorNode.portCounts ?? Object.fromEntries(sensorNode.activePorts.map((portId) => [portId, 1]))
+      : Object.fromEntries(
+          getEffectivePorts(sensorNode, allDefs).map((port) => [port.id, 1] as const)
+        );
+    const nextNodes = store.nodes.map((node) =>
+      node.instanceId === sensorNode.instanceId
+        ? {
+            ...node,
+            activePorts: Object.keys(seededSensorCounts),
+            portCounts: seededSensorCounts,
+          }
+        : node
+    );
+    const nextEdges = [...store.edges, edge];
+    const autoBoardPortCounts = suggestAutoBoardPortCounts(
+      boardNode.instanceId,
+      nextNodes,
+      nextEdges,
+      allDefs
+    );
+
+    if (!sensorHasSelections) {
+      store.replaceNodePortCounts(sensorNode.instanceId, seededSensorCounts);
+    }
+    if (autoBoardPortCounts) {
+      store.replaceNodePortCounts(boardNode.instanceId, autoBoardPortCounts);
+    }
     setRfEdges((prev) => rfAddEdge(buildRfEdge(edge), prev));
     store.addEdge(edge);
     return true;

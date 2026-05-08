@@ -68,6 +68,7 @@ interface DiagramState {
   renameNode: (instanceId: string, label: string) => void;
   togglePort: (instanceId: string, portId: string) => void;
   setPortCount: (instanceId: string, portId: string, count: number) => void;
+  replaceNodePortCounts: (instanceId: string, portCounts: Record<string, number>) => void;
 
   // edge actions
   addEdge: (edge: DiagramEdge) => void;
@@ -213,6 +214,18 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
     nodes: s.nodes.map((n) => (
       n.instanceId === instanceId ? withPortCount(n, portId, count) : n
     )),
+  })),
+
+  replaceNodePortCounts: (instanceId, portCounts) => set((s) => ({
+    nodes: s.nodes.map((n) => {
+      if (n.instanceId !== instanceId) return n;
+      const normalized = normalizePortState([], portCounts);
+      return {
+        ...n,
+        activePorts: normalized.activePorts,
+        portCounts: normalized.portCounts,
+      };
+    }),
   })),
 
   addEdge: (edge) => set((s) => {

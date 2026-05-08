@@ -77,6 +77,10 @@ function getPortCompatibilityScore(sensorPort: PortDef, boardPort: PortDef): num
   }
 }
 
+function prefersSharedBoardPort(role: PortDef['role']): boolean {
+  return role === 'power' || role === 'gnd';
+}
+
 function getNodeType(
   node: DiagramNode | undefined,
   defs: ComponentDef[]
@@ -233,6 +237,145 @@ export function analyzeEdgeAssignment(
   if (!pair) return null;
   const boardSummary = analyzeBoardAssignments(pair.boardNode.instanceId, nodes, edges, defs);
   return boardSummary?.assignments.find((assignment) => assignment.edge.id === edgeId) ?? null;
+}
+
+type BoardPortCandidate = {
+  port: PortDef;
+  portOrder: number;
+  plannedCount: number;
+  usedCount: number;
+  score: number;
+};
+
+function compareCapacityCandidate(
+  left: BoardPortCandidate,
+  right: BoardPortCandidate
+): number {
+  if (right.score !== left.score) return right.score - left.score;
+  const leftRemaining = left.plannedCount - left.usedCount;
+  const rightRemaining = right.plannedCount - right.usedCount;
+  if (rightRemaining !== leftRemaining) return rightRemaining - leftRemaining;
+  return left.portOrder - right.portOrder;
+}
+
+function compareGrowthCandidate(
+  sensorPort: PortDef,
+  left: BoardPortCandidate,
+  right: BoardPortCandidate
+): number {
+  const preferShared = prefersSharedBoardPort(sensorPort.role);
+  const leftHasExisting = left.plannedCount > 0 ? 0 : 1;
+  const rightHasExisting = right.plannedCount > 0 ? 0 : 1;
+  const leftIsUnused = left.plannedCount === 0 ? 0 : 1;
+  const rightIsUnused = right.plannedCount === 0 ? 0 : 1;
+
+  if (preferShared) {
+    if (leftHasExisting !== rightHasExisting) return leftHasExisting - rightHasExisting;
+  } else {
+    if (leftIsUnused !== rightIsUnused) return leftIsUnused - rightIsUnused;
+    if (left.plannedCount !== right.plannedCount) return left.plannedCount - right.plannedCount;
+  }
+
+  if (right.score !== left.score) return right.score - left.score;
+  return left.portOrder - right.portOrder;
+}
+
+function findBestCapacityCandidate(
+  sensorPort: PortDef,
+  boardPorts: PortDef[],
+  boardPortOrder: Map<string, number>,
+  plannedCounts: Record<string, number>,
+  usedCounts: Record<string, number>
+): BoardPortCandidate | null {
+  const candidates = boardPorts
+    .map((port) => ({
+      port,
+      portOrder: boardPortOrder.get(port.id) ?? Number.MAX_SAFE_INTEGER,
+      plannedCount: plannedCounts[port.id] ?? 0,
+      usedCount: usedCounts[port.id] ?? 0,
+      score: getPortCompatibilityScore(sensorPort, port),
+    }))
+    .filter((candidate) => candidate.score > 0 && candidate.plannedCount > candidate.usedCount)
+    .sort(compareCapacityCandidate);
+
+  return candidates[0] ?? null;
+}
+
+function findBestGrowthCandidate(
+  sensorPort: PortDef,
+  boardPorts: PortDef[],
+  boardPortOrder: Map<string, number>,
+  plannedCounts: Record<string, number>,
+  usedCounts: Record<string, number>
+): BoardPortCandidate | null {
+  const candidates = boardPorts
+    .map((port) => ({
+      port,
+      portOrder: boardPortOrder.get(port.id) ?? Number.MAX_SAFE_INTEGER,
+      plannedCount: plannedCounts[port.id] ?? 0,
+      usedCount: usedCounts[port.id] ?? 0,
+      score: getPortCompatibilityScore(sensorPort, port),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => compareGrowthCandidate(sensorPort, left, right));
+
+  return candidates[0] ?? null;
+}
+
+export function suggestAutoBoardPortCounts(
+  boardId: string,
+  nodes: DiagramNode[],
+  edges: DiagramEdge[],
+  defs: ComponentDef[]
+): Record<string, number> | null {
+  const boardNode = nodes.find((node) => node.instanceId === boardId);
+  if (!boardNode || getNodeType(boardNode, defs) !== 'board') return null;
+
+  const boardPorts = getEffectivePorts(boardNode, defs);
+  const boardPortOrder = new Map(boardPorts.map((port, index) => [port.id, index]));
+  const plannedCounts: Record<string, number> = {};
+  const usedCounts: Record<string, number> = {};
+
+  for (const port of boardPorts) {
+    const count = getPortCount(boardNode, port.id);
+    if (count > 0) plannedCounts[port.id] = count;
+  }
+
+  const relatedPairs = edges
+    .map((edge) => resolveBoardSensorPair(edge, nodes, defs))
+    .filter((pair): pair is BoardSensorPair => !!pair && pair.boardNode.instanceId === boardId);
+
+  for (const pair of relatedPairs) {
+    const sensorPorts = getSelectedPorts(pair.sensorNode, defs);
+    for (const sensorPort of sensorPorts) {
+      const capacityCandidate = findBestCapacityCandidate(
+        sensorPort,
+        boardPorts,
+        boardPortOrder,
+        plannedCounts,
+        usedCounts
+      );
+
+      if (capacityCandidate) {
+        usedCounts[capacityCandidate.port.id] = (usedCounts[capacityCandidate.port.id] ?? 0) + 1;
+        continue;
+      }
+
+      const growthCandidate = findBestGrowthCandidate(
+        sensorPort,
+        boardPorts,
+        boardPortOrder,
+        plannedCounts,
+        usedCounts
+      );
+      if (!growthCandidate) continue;
+
+      plannedCounts[growthCandidate.port.id] = (plannedCounts[growthCandidate.port.id] ?? 0) + 1;
+      usedCounts[growthCandidate.port.id] = (usedCounts[growthCandidate.port.id] ?? 0) + 1;
+    }
+  }
+
+  return plannedCounts;
 }
 
 export function formatPortMapping(assignment: EdgeAssignment): string {
