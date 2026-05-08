@@ -167,6 +167,10 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
     }
   };
 
+  const handleSupport = () => {
+    window.open('https://buymeacoffee.com/drasogo', '_blank', 'noopener,noreferrer');
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && guideOpen) {
@@ -245,6 +249,7 @@ export default function Toolbar({ theme, onToggleTheme }: Props) {
         <Sep />
 
         <Btn label="SHARE" title="Copy shareable URL to clipboard" onClick={handleShare} accent />
+        <Btn label="SUPPORT" title="Support the project" onClick={handleSupport} accent />
 
         <Sep />
 

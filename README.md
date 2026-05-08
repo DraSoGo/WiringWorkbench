@@ -226,6 +226,14 @@ State is split conceptually between:
 
 ---
 
+## Support
+
+If WiringWorkbench is useful to you, you can support the project here:
+
+[Support Me](https://buymeacoffee.com/drasogo)
+
+---
+
 ## License
 
 This project is licensed under the **GPL-3.0** License. See [LICENSE](LICENSE) for details.
