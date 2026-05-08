@@ -1,0 +1,17 @@
+{
+  "name": "WiringWorkbench",
+  "short_name": "WiringWorkbench",
+  "description": "A visual wiring planner for Arduino and embedded projects.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f0e",
+  "theme_color": "#0d0f0e",
+  "icons": [
+    {
+      "src": "/icons.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
