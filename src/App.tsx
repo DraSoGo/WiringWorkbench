@@ -16,7 +16,7 @@ declare global {
 
 const mono = { fontFamily: 'IBM Plex Mono, monospace' } as const;
 
-type RoutePath = '/' | '/features' | '/how-it-works' | '/faq' | '/project';
+type RoutePath = '/' | '/features' | '/how-it-works' | '/faq' | '/contact' | '/project';
 
 type RouteMeta = {
   title: string;
@@ -54,6 +54,13 @@ const routeMeta: Record<RoutePath, RouteMeta> = {
     description:
       'Read common questions about WiringWorkbench, including what the tool does, how saving and export work, and how it fits into Arduino and embedded prototyping workflows.',
     url: `${BASE_URL}/faq`,
+    robots: 'index, follow',
+  },
+  '/contact': {
+    title: 'Contact | WiringWorkbench',
+    description:
+      'Get in touch with the WiringWorkbench developer. Find links to GitHub and email for questions, feedback, or collaboration.',
+    url: `${BASE_URL}/contact`,
     robots: 'index, follow',
   },
   '/project': {
@@ -120,6 +127,7 @@ function normalizeRoute(pathname: string): RoutePath {
   if (trimmed === '/features') return '/features';
   if (trimmed === '/how-it-works') return '/how-it-works';
   if (trimmed === '/faq') return '/faq';
+  if (trimmed === '/contact') return '/contact';
   if (trimmed === '/project') return '/project';
   return '/';
 }
@@ -289,6 +297,7 @@ function MarketingShell({
             <PublicLink label="FEATURES" href="/features" active={route === '/features'} onNavigate={onNavigate} />
             <PublicLink label="HOW IT WORKS" href="/how-it-works" active={route === '/how-it-works'} onNavigate={onNavigate} />
             <PublicLink label="FAQ" href="/faq" active={route === '/faq'} onNavigate={onNavigate} />
+            <PublicLink label="CONTACT" href="/contact" active={route === '/contact'} onNavigate={onNavigate} />
           </nav>
 
           <div style={{ flex: 1 }} />
@@ -341,6 +350,7 @@ function MarketingShell({
             <PublicLink label="HOME" href="/" onNavigate={onNavigate} />
             <PublicLink label="FEATURES" href="/features" onNavigate={onNavigate} />
             <PublicLink label="FAQ" href="/faq" onNavigate={onNavigate} />
+            <PublicLink label="CONTACT" href="/contact" onNavigate={onNavigate} />
             <PublicLink label="PROJECT" href="/project" onNavigate={onNavigate} accent />
           </div>
         </div>
@@ -741,6 +751,77 @@ function FaqPage({ onNavigate }: { onNavigate: (to: RoutePath) => void }) {
   );
 }
 
+function ContactPage() {
+  return (
+    <main
+      style={{
+        background:
+          'linear-gradient(180deg, var(--bg-base) 0%, var(--bg-surface) 100%)',
+      }}
+    >
+      <section style={{ maxWidth: 1200, margin: '0 auto', padding: '60px 24px 32px' }}>
+        <div style={{ ...mono, fontSize: 11, letterSpacing: '0.12em', color: 'var(--amber)', marginBottom: 12 }}>
+          CONTACT
+        </div>
+        <h1 style={{ fontSize: 'clamp(2rem, 4.5vw, 4rem)', lineHeight: 1.05, marginBottom: 18 }}>
+          Get in touch.
+        </h1>
+        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.75, maxWidth: 680, marginBottom: 40 }}>
+          Have a question, found a bug, or want to contribute? Reach out via GitHub or email.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
+          <a
+            href="https://github.com/DraSoGo"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              border: '1px solid var(--border)',
+              background: 'var(--bg-panel)',
+              padding: 24,
+              textDecoration: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              transition: 'border-color 0.15s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--phosphor)')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+          >
+            <div style={{ ...mono, fontSize: 10, color: 'var(--phosphor)', letterSpacing: '0.1em' }}>GITHUB</div>
+            <div style={{ fontSize: 18, color: 'var(--text-primary)', fontWeight: 600 }}>DraSoGo</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
+              github.com/DraSoGo
+            </div>
+          </a>
+
+          <a
+            href="mailto:vdhfmfatv4321@gmail.com"
+            style={{
+              border: '1px solid var(--border)',
+              background: 'var(--bg-panel)',
+              padding: 24,
+              textDecoration: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              transition: 'border-color 0.15s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--phosphor)')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+          >
+            <div style={{ ...mono, fontSize: 10, color: 'var(--phosphor)', letterSpacing: '0.1em' }}>EMAIL</div>
+            <div style={{ fontSize: 18, color: 'var(--text-primary)', fontWeight: 600 }}>Send a message</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
+              vdhfmfatv4321@gmail.com
+            </div>
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function ProjectWorkspace({
   theme,
   onToggleTheme,
@@ -874,6 +955,8 @@ export default function App() {
         return <HowItWorksPage onNavigate={navigate} />;
       case '/faq':
         return <FaqPage onNavigate={navigate} />;
+      case '/contact':
+        return <ContactPage />;
       case '/':
       default:
         return <HomePage onNavigate={navigate} />;
